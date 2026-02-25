@@ -1,6 +1,6 @@
 import os
 import inspect
-from typing import Literal, Optional, Union, Callable, List
+from typing import Union, Callable
 
 from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
 from dynamic_agent_service.agent.language_engine import LanguageEngine
@@ -47,21 +47,17 @@ class AgentGeneralInterface:
     async def create(
             cls,
             language_engine: LanguageEngine,
-            operators: Optional[List] = None,
             setting: Union[str, Callable] = "",
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._agent_setting = setting
-        agi.operators = operators or []
-
-        agi._tools = []
-        for op in agi.operators:
-            tools_with_ref = op.get_tools_with_ref()
-            agi._tools.extend(tools_with_ref)
-            logger.info(f"Registered operator: {type(op).__name__} with {len(tools_with_ref)} tools")
-
-        logger.info(f"Total tools: {len(agi._tools)}")
         return agi
+
+    def add_operator(self, operator) -> None:
+        self.operators.append(operator)
+        tools_with_ref = operator.get_tools_with_ref()
+        self._tools.extend(tools_with_ref)
+        logger.info(f"Registered operator: {type(operator).__name__} with {len(tools_with_ref)} tools")
 
     async def trigger(self, message: dict, stream_callback=None) -> str:
         system_message = await self._forge_system_message()

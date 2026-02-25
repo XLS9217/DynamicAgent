@@ -1,0 +1,1 @@
+uv run -m dynamic_agent_service

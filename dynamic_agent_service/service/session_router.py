@@ -1,5 +1,6 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket
 import logging
+from dynamic_agent_service.service.session_management import RealtimeSessionManager
 
 logger = logging.getLogger(__name__)
 
@@ -9,9 +10,9 @@ router = APIRouter()
 async def agent_session(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection established")
+    session = RealtimeSessionManager.create(websocket)
     try:
-        while True:
-            data = await websocket.receive_json()
-            await websocket.send_json({"echo": data})
-    except WebSocketDisconnect:
-        logger.info("WebSocket connection closed")
+        await session.listen()
+    finally:
+        RealtimeSessionManager.remove(session)
+        logger.info("WebSocket connection cleaned up")

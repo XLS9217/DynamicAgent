@@ -1,7 +1,20 @@
 [project]
 name = "dynamicagent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Workspace manager for dynamic agent client and service"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.13"
+dependencies = [
+    "dynamic-agent-client",
+    "dynamic-agent-service",
+]
+
+[tool.uv.workspace]
+members = [
+    "dynamic_agent_client",
+    "dynamic_agent_service",
+]
+
+[tool.uv.sources]
+dynamic-agent-client = { workspace = true }
+dynamic-agent-service = { workspace = true }

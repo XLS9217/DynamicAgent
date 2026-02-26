@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket, HTTPException
+from fastapi import APIRouter, WebSocket, HTTPException, Request
 from pydantic import BaseModel
 import logging
 
@@ -12,16 +12,17 @@ router = APIRouter()
 class CreateSessionRequest(BaseModel):
     setting: str
 
-
 @router.post("/create_session")
-async def create_session(body: CreateSessionRequest):
+async def create_session(body: CreateSessionRequest, request: Request):
     session = RealtimeSessionManager.create(setting=body.setting)
     await session.agent_setup()
-    return {"session_id": session.session_id}
+    socket_url = f"ws://{request.headers['host']}/realtime_session?session_id={session.session_id}"
+    return {"session_id": session.session_id, "socket_url": socket_url}
 
 
-@router.websocket("/agent_session")
-async def agent_session(websocket: WebSocket, session_id: str):
+@router.websocket("/realtime_session")
+async def realtime_session(websocket: WebSocket, session_id: str):
+    logger.info("WebSocket request received for session %s", session_id)
     session = RealtimeSessionManager.get(session_id)
     if session is None:
         await websocket.close(code=4004)
@@ -35,3 +36,10 @@ async def agent_session(websocket: WebSocket, session_id: str):
     finally:
         RealtimeSessionManager.remove(session)
         logger.info("WebSocket cleaned up for session %s", session_id)
+
+@router.websocket("/echo")
+async def echo(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        await websocket.send_text(data)

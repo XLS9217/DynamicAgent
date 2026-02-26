@@ -38,7 +38,7 @@ class AgentGeneralInterface:
             )
 
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
-        self._agent_setting = ""
+        self._setting = ""
         self._tools: list = []
         self._response_handler = AgentResponseHandler(self.llm_engine)
         self.operators: list = []
@@ -50,7 +50,7 @@ class AgentGeneralInterface:
             setting: Union[str, Callable] = "",
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
-        agi._agent_setting = setting
+        agi._setting = setting
         return agi
 
     def add_operator(self, operator) -> None:
@@ -97,12 +97,12 @@ class AgentGeneralInterface:
         return "".join(all_responses)
 
     async def _forge_system_message(self) -> str:
-        if callable(self._agent_setting):
-            if inspect.iscoroutinefunction(self._agent_setting):
-                setting_str = await self._agent_setting()
+        if callable(self._setting):
+            if inspect.iscoroutinefunction(self._setting):
+                setting_str = await self._setting()
             else:
-                setting_str = self._agent_setting()
+                setting_str = self._setting()
         else:
-            setting_str = self._agent_setting
+            setting_str = self._setting
 
         return self._system_message_template.replace("{{setting}}", setting_str)

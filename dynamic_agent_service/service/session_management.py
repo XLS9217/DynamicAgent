@@ -3,7 +3,7 @@ import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
-from dynamic_agent_service.service.session_service_structs import AgentResponseMessage, AgentResponseChunk
+from dynamic_agent_service.service.session_service_structs import AgentResponseChunk
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +41,11 @@ class RealtimeSession:
         msg_type = message.get("type")
 
         if msg_type == "invoke":
-            if self.agi is None:
-                await self.client.send_json({"error": "session not set up"})
-                return
-
             async def stream_callback(chunk: str, finished: bool = False):
                 resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=finished)
                 await self.client.send_json(resp.model_dump())
 
             full_text = await self.agi.trigger(message, stream_callback=stream_callback)
-
-            final = AgentResponseMessage(type="agent_message", text=full_text)
-            await self.client.send_json(final.model_dump())
 
         else:
             logger.warning("unknown message type: %s", msg_type)

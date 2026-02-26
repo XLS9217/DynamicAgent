@@ -26,51 +26,25 @@ class LanguageEngine:
         )
         self.model = model
 
-    def generate_response(
-            self,
-            messages: list,
-            system_prompt: str = "You are a helpful assistant.",
-            tools: list = None
-    ) -> str:
-        """
-        Generate a non-streaming response from the LLM
-
-        :param messages: List of message dicts in OpenAI format [{"role": "user", "content": "..."}]
-        :param system_prompt: System prompt to set the assistant's behavior
-        :param tools: Optional list of tools in OpenAI function calling format
-        :return: Complete response string from the LLM
-        """
-        # Prepend system message to the messages
-        full_messages = [{"role": "system", "content": system_prompt}] + messages
-
-        kwargs = {
-            "model": self.model,
-            "messages": full_messages,
-            "stream": False
-        }
-        if tools:
-            kwargs["tools"] = tools
-
-        completion = self.client.chat.completions.create(**kwargs)
-        return completion.choices[0].message
-
     def stream_response(
             self,
             messages: list,
-            tools: list = None
+            tools: list = None,
+            parallel_tool_calls: bool = False
     ):
         """
         Generate a streaming response from the LLM
 
         :param messages: List of message dicts in OpenAI format (including system message)
         :param tools: Optional list of tools in OpenAI function calling format
+        :param parallel_tool_calls: Whether to allow parallel tool calls (default: False)
         :yields: Chunks of the response as they arrive
         """
         kwargs = {
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "parallel_tool_calls": False
+            "parallel_tool_calls": parallel_tool_calls
         }
         if tools:
             kwargs["tools"] = tools
@@ -80,15 +54,15 @@ class LanguageEngine:
         for chunk in completion:
             yield chunk
 
-    async def async_response(
-            self,
-            messages: list,
-            system_prompt: str = "You are a helpful assistant.",
-    ) -> str:
-        """Async version of generate_response"""
-        full_messages = [{"role": "system", "content": system_prompt}] + messages
-        completion = await self.async_client.chat.completions.create(
-            model=self.model,
-            messages=full_messages,
-        )
-        return completion.choices[0].message.content
+    # async def async_response(
+    #         self,
+    #         messages: list,
+    #         system_prompt: str = "You are a helpful assistant.",
+    # ) -> str:
+    #     """Async version of generate_response"""
+    #     full_messages = [{"role": "system", "content": system_prompt}] + messages
+    #     completion = await self.async_client.chat.completions.create(
+    #         model=self.model,
+    #         messages=full_messages,
+    #     )
+    #     return completion.choices[0].message.content

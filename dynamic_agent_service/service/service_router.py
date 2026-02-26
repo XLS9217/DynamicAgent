@@ -16,12 +16,12 @@ class CreateSessionRequest(BaseModel):
 async def create_session(body: CreateSessionRequest, request: Request):
     session = RealtimeSessionManager.create(setting=body.setting)
     await session.agent_setup()
-    socket_url = f"ws://{request.headers['host']}/realtime_session?session_id={session.session_id}"
+    socket_url = f"ws://{request.headers['host']}/agent_session?session_id={session.session_id}"
     return {"session_id": session.session_id, "socket_url": socket_url}
 
 
-@router.websocket("/realtime_session")
-async def realtime_session(websocket: WebSocket, session_id: str):
+@router.websocket("/agent_session")
+async def agent_session(websocket: WebSocket, session_id: str):
     logger.info("WebSocket request received for session %s", session_id)
     session = RealtimeSessionManager.get(session_id)
     if session is None:
@@ -36,6 +36,13 @@ async def realtime_session(websocket: WebSocket, session_id: str):
     finally:
         RealtimeSessionManager.remove(session)
         logger.info("WebSocket cleaned up for session %s", session_id)
+
+@router.post("/agent_operator")
+async def register_operator():
+    """
+    should come with a session_id and a serialized operator json
+    get the session and add the operator
+    """
 
 @router.websocket("/echo")
 async def echo(websocket: WebSocket):

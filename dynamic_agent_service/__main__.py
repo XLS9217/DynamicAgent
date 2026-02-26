@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from dynamic_agent_service.service.session_router import router as session_router
+from dynamic_agent_service.service.service_router import router as session_router
 
 app = FastAPI()
 app.include_router(session_router)

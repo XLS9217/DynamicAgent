@@ -26,6 +26,12 @@ class RealtimeSession:
     def attach_websocket(self, client: WebSocket):
         self.client = client
 
+    def register_operator(self):
+        """
+        call agi's register_operator
+        """
+        pass
+
     async def listen(self):
         try:
             while True:

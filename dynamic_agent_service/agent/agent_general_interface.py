@@ -34,6 +34,8 @@ class AgentGeneralInterface:
         self._setting = ""
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
+        self._operator_dict = {}
+
     @classmethod
     async def create(
             cls,
@@ -49,14 +51,20 @@ class AgentGeneralInterface:
         messages.append({"role": "system", "content": await self._forge_system_message()})
         messages.append({"role": "user", "content": message.get("text", "")})
 
-        full_response = await self._response_handler.invoke(
+        invoke_response = await self._response_handler.invoke(
             messages=messages,
             stream_callback=stream_callback,
         )
 
         # tool call loop will be here
 
-        return full_response
+        return invoke_response
+
+    def register_operator(self, operator_serialized_json):
+        """
+        construct a OperatorHandler save to self._operator_dict
+        """
+        pass
 
     async def _forge_system_message(self) -> str:
         if callable(self._setting):

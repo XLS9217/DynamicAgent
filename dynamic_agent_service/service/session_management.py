@@ -46,6 +46,7 @@ class RealtimeSession:
                 await self.client.send_json(resp.model_dump())
 
             full_text = await self.agi.trigger(message, stream_callback=stream_callback)
+            await stream_callback("", finished=True)
 
         else:
             logger.warning("unknown message type: %s", msg_type)

@@ -26,11 +26,11 @@ class RealtimeSession:
     def attach_websocket(self, client: WebSocket):
         self.client = client
 
-    def register_operator(self):
+    def register_operator(self, operator_data: dict):
         """
-        call agi's register_operator
+        Forward the serialized operator data to AGI for registration.
         """
-        pass
+        self.agi.register_operator(operator_data)
 
     async def listen(self):
         try:

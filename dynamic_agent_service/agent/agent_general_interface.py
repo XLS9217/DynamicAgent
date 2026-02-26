@@ -60,11 +60,15 @@ class AgentGeneralInterface:
 
         return invoke_response
 
-    def register_operator(self, operator_serialized_json):
+    def register_operator(self, operator_data: dict):
         """
-        construct a OperatorHandler save to self._operator_dict
+        Construct an OperatorHandler from the serialized operator data
+        and store it in _operator_dict keyed by name.
         """
-        pass
+        from dynamic_agent_service.agent.operator_handler import OperatorHandler
+        handler = OperatorHandler.from_serialized(operator_data)
+        self._operator_dict[handler.name] = handler
+        logger.info(f"Registered operator: {handler.name}")
 
     async def _forge_system_message(self) -> str:
         if callable(self._setting):

@@ -14,9 +14,14 @@ class CreateSessionRequest(BaseModel):
 
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
+
     session = RealtimeSessionManager.create(setting=body.setting)
     await session.agent_setup()
-    socket_url = f"ws://{request.headers['host']}/agent_session?session_id={session.session_id}"
+
+    scheme = request.headers.get("x-forwarded-proto", "http")
+    ws_scheme = "wss" if scheme == "https" else "ws"
+    socket_url = f"{ws_scheme}://{request.headers['host']}/agent_session?session_id={session.session_id}"
+
     return {"session_id": session.session_id, "socket_url": socket_url}
 
 
@@ -37,12 +42,24 @@ async def agent_session(websocket: WebSocket, session_id: str):
         RealtimeSessionManager.remove(session)
         logger.info("WebSocket cleaned up for session %s", session_id)
 
+
+
+class RegisterOperatorRequest(BaseModel):
+    session_id: str
+    operator: dict
+
 @router.post("/agent_operator")
-async def register_operator():
+async def register_operator(body: RegisterOperatorRequest):
     """
-    should come with a session_id and a serialized operator json
-    get the session and add the operator
+    Receives a session_id and a serialized operator, registers it on the session's AGI.
     """
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.register_operator(body.operator)
+    return {"status": "ok", "operator_name": body.operator.get("name")}
+
+
 
 @router.websocket("/echo")
 async def echo(websocket: WebSocket):

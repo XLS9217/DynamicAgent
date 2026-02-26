@@ -1,10 +1,10 @@
 from fastapi import APIRouter, WebSocket, HTTPException, Request
 from pydantic import BaseModel
-import logging
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
+from dynamic_agent_service.util.setup_logging import get_my_logger
 
-logger = logging.getLogger(__name__)
+logger = get_my_logger()
 
 router = APIRouter()
 

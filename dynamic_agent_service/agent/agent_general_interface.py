@@ -5,6 +5,7 @@ from typing import Union, Callable
 from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.agent.operator_handler import OperatorHandler
 
 logger = get_my_logger()
 
@@ -65,10 +66,9 @@ class AgentGeneralInterface:
         Construct an OperatorHandler from the serialized operator data
         and store it in _operator_dict keyed by name.
         """
-        from dynamic_agent_service.agent.operator_handler import OperatorHandler
         handler = OperatorHandler.from_serialized(operator_data)
         self._operator_dict[handler.name] = handler
-        logger.info(f"Registered operator: {handler.name}")
+        logger.info(f"Registered operator: {handler.tools}")
 
     async def _forge_system_message(self) -> str:
         if callable(self._setting):

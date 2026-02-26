@@ -1,9 +1,11 @@
+import asyncio
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dynamic_agent_client.src.client import DynamicAgentClient
 from dynamic_agent_client.src.operator.agent_operator_base import AgentOperator, agent_tool, description, flow
 
 
@@ -44,9 +46,22 @@ class MathOperator(AgentOperator):
         ]
 
 
-if __name__ == "__main__":
+async def main():
+    # 1. Connect to the service and create a session
+    client = await DynamicAgentClient.create(
+        setting="You are a helpful math assistant.",
+        server_addr="http://172.16.16.246:7777",
+    )
+    print(f"Session created: {client.session_id}")
 
+    # 2. Register the MathOperator
     op = MathOperator()
-    serialized = op.get_serialized_operator()
+    result = await client.add_operator(op)
+    print(f"Operator registered: {result}")
 
-    print(f"\n{serialized.model_dump_json(indent=2)}")
+    await asyncio.sleep(2)
+    await client.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

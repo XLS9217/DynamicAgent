@@ -4,8 +4,9 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
+from dynamic_agent_service.util.setup_logging import get_my_logger
 
-logger = logging.getLogger(__name__)
+logger = get_my_logger()
 
 
 class RealtimeSession:

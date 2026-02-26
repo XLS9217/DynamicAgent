@@ -16,15 +16,13 @@ class AgentResponseHandler:
     async def _stream_response_flow(
             self,
             messages: list,
-            system_prompt: str,
             tools_with_ref: list | None,
             stream_callback: Callable[[str], None] | None
     ) -> tuple[str, list, dict | None]:
         """
         Handle streaming response flow.
 
-        :param messages: Conversation history in OpenAI format
-        :param system_prompt: System message
+        :param messages: Conversation history in OpenAI format (including system message)
         :param tools_with_ref: Tools with operator reference (for execution)
         :param stream_callback: Async callback for content chunks
         :return: Tuple of (full_response, tool_calls_with_results, assistant_msg)
@@ -41,7 +39,7 @@ class AgentResponseHandler:
                 tool_name = t["function"]["name"]
                 tool_operator_map[tool_name] = t["_operator"]
 
-        for chunk in self.llm_engine.stream_response(messages, system_prompt, tools):
+        for chunk in self.llm_engine.stream_response(messages, tools):
             if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
 
@@ -127,24 +125,15 @@ class AgentResponseHandler:
     async def invoke(
             self,
             messages: list,
-            system_prompt: str,
             tools_with_ref: list | None = None,
             stream_callback: Callable[[str], None] | None = None,
-            is_stream: bool = True
     ) -> tuple[str, list, dict | None]:
         """
         Invoke the response flow.
 
-        :param messages: Conversation history in OpenAI format
-        :param system_prompt: System message
+        :param messages: Conversation history in OpenAI format (including system message)
         :param tools_with_ref: Tools with operator reference (for execution)
-        :param stream_callback: Async callback for content chunks (stream mode only)
-        :param is_stream: Whether to use streaming mode
+        :param stream_callback: Async callback for content chunks
         :return: Tuple of (full_response, tool_calls_list, assistant_msg)
         """
-        if is_stream:
-            return await self._stream_response_flow(messages, system_prompt, tools_with_ref, stream_callback)
-        else:
-            tools = [{"type": t["type"], "function": t["function"]} for t in tools_with_ref] if tools_with_ref else None
-            result = await self._block_response_flow(messages, system_prompt, tools)
-            return result[0], result[1], None
+        return await self._stream_response_flow(messages, tools_with_ref, stream_callback)

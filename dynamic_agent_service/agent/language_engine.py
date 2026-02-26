@@ -57,25 +57,20 @@ class LanguageEngine:
     def stream_response(
             self,
             messages: list,
-            system_prompt: str = "You are a helpful assistant.",
             tools: list = None
     ):
         """
         Generate a streaming response from the LLM
 
-        :param messages: List of message dicts in OpenAI format [{"role": "user", "content": "..."}]
-        :param system_prompt: System prompt to set the assistant's behavior
+        :param messages: List of message dicts in OpenAI format (including system message)
         :param tools: Optional list of tools in OpenAI function calling format
         :yields: Chunks of the response as they arrive
         """
-        # Prepend system message to the messages
-        full_messages = [{"role": "system", "content": system_prompt}] + messages
-
         kwargs = {
             "model": self.model,
-            "messages": full_messages,
+            "messages": messages,
             "stream": True,
-            "parallel_tool_calls":False
+            "parallel_tool_calls": False
         }
         if tools:
             kwargs["tools"] = tools

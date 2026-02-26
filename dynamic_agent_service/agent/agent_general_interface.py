@@ -60,15 +60,14 @@ class AgentGeneralInterface:
         logger.info(f"Registered operator: {type(operator).__name__} with {len(tools_with_ref)} tools")
 
     async def trigger(self, message: dict, stream_callback=None) -> str:
-        system_message = await self._forge_system_message()
-        messages = [{"role": "user", "content": message.get("text", "")}]
+        messages = []
+        messages.append({"role": "system", "content": await self._forge_system_message()})
+        messages.append({"role": "user", "content": message.get("text", "")})
 
         full_response, tool_calls_with_results, assistant_msg = await self._response_handler.invoke(
             messages=messages,
-            system_prompt=system_message,
             tools_with_ref=self._tools,
             stream_callback=stream_callback,
-            is_stream=True
         )
 
         all_responses = [full_response]
@@ -87,10 +86,8 @@ class AgentGeneralInterface:
 
             full_response, tool_calls_with_results, assistant_msg = await self._response_handler.invoke(
                 messages=messages,
-                system_prompt=system_message,
                 tools_with_ref=self._tools,
                 stream_callback=stream_callback,
-                is_stream=True
             )
             all_responses.append(full_response)
 

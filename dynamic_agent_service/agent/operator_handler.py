@@ -1,6 +1,12 @@
 
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
 
+class ServiceOperator:
+    """
+    TO-ClaudeCode, delete this comment after refector
+    """
+    pass
+
 
 class OperatorHandler:
 
@@ -16,16 +22,19 @@ class OperatorHandler:
         self.description = description
         self.flows = flows
         self.tools = tools  # list of OpenAI function tool schemas
+        self.raw_json = None
 
     @classmethod
     def from_serialized(cls, data: dict) -> "OperatorHandler":
         """Construct an OperatorHandler from a serialized operator dict."""
-        return cls(
+        handler = cls(
             name=data["name"],
             description=data.get("description"),
             flows=data.get("flows"),
             tools=data.get("tools", []),
         )
+        handler.raw_json = data
+        return handler
 
     async def execute(self, client_socket, tool_call: AgentToolCall):
         """

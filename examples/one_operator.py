@@ -66,12 +66,8 @@ async def main():
     print(f"Operator registered: {result}")
 
     # 3. Ask for a cross product
-    response = await client.trigger("Calculate the cross product of [6.234, 22.61, 3.61234] and [4, 5, 6]")
+    response = await client.trigger("Calculate the cross product of [6.234, 22.61, 3.61234] and [4, 5, 6], then calculate the dot product of the result and [0.82, 0.2412, 0.111].")
     print(f"Response: {response}")
-
-    await asyncio.sleep(2)
-    await client.close()
-
 
 if __name__ == "__main__":
     asyncio.run(main())

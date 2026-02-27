@@ -1,7 +1,7 @@
 
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.util.setup_logging import get_my_logger
-from dynamic_agent_service.util.debug_cache_writer import debug_cache_json
+from dynamic_agent_service.util.debug_cache_writer import debug_cache_json, debug_cache_md
 
 logger = get_my_logger()
 
@@ -27,29 +27,43 @@ class ServiceOperator:
         Construct a ServiceOperator from a serialized operator dict.
         Introduced in dynamic_agent_client/src/operator/agent_operator_base.py
         """
+        name = data["name"]
+        tools = data.get("tools", [])
+        # prefix tool names so the agent can route calls back to the right operator
+        for tool in tools:
+            func = tool.get("function", {})
+            func["name"] = f"{name}_{func['name']}"
+
         handler = cls(
-            name=data["name"],
+            name=name,
             description=data.get("description"),
             flows=data.get("flows"),
-            tools=data.get("tools", []),
+            tools=tools,
         )
         handler.raw_json = data
         return handler
 
     def get_menu_item(self):
-        """
-        Generate a menu which is a string like following:
-        Operator Name: [Operator Name]
-        Operator Description: [Description of the operator]
-        Flows for tool with prefix [Operator Name]:
-            - list of name:content
-        Tools:
-            - list of name:description
-            - but the list will have [Operator Name] as prefix, for example [Operator Name]_[actual_tool_name]
-            - when recording the tools in from_serialized, make sure the name will be [Operator Name]_[actual_tool_name]
-        """
-        menu = f""
-        return menu
+        """Build a human-readable summary of this operator for the agent's system prompt."""
+        lines = [
+            f"# Operator Name: {self.name}",
+            f"## Operator Description:",
+            self.description or '',
+        ]
+
+        if self.flows:
+            lines.append(f"## Flows for tool with prefix {self.name}:")
+            for flow_dict in self.flows:
+                for flow_name, flow_content in flow_dict.items():
+                    lines.append(f"### {flow_name}:")
+                    lines.append(flow_content)
+
+        lines.append("## Tools:")
+        for tool in self.tools:
+            func = tool.get("function", {})
+            lines.append(f"- {func.get('name', '')}: {func.get('description', '')}")
+
+        return "\n".join(lines)
 
     async def execute(self, client_socket, tool_call: AgentToolCall):
         """
@@ -76,23 +90,27 @@ class OperatorHandler:
         self._operator_dict[service_operator.name] = service_operator
         logger.info(f"Registered operator: {service_operator.tools}")
 
+        # DEBUG LINE: comment out or delete
         debug_cache_json(f"operator_{service_operator.name}", service_operator.raw_json)
+        debug_cache_json("operator_tools_all", self.get_tools(list(self._operator_dict.keys())))
+        debug_cache_md("operator_menu_all", self.get_menu())
+
+
 
     def get_menu(self):
-        """
-        return the menu of all service operators split by ----
-        it will look like
-        [menu1]
-        -----
-        [menu2]
-        -----
-        [menu3]
-        """
+        """Return a combined menu string of all registered operators, separated by -----."""
+        menus = [op.get_menu_item() for op in self._operator_dict.values()]
+        menu_text = "\n-----\n".join(menus)
+        return menu_text
 
-    def get_tools(self, operator_name:list[str]):
-        """
-        get all tools from selected operators
-        """
+    def get_tools(self, operator_names: list[str]):
+        """Collect all OpenAI tool schemas from the given operator names."""
+        tools = []
+        for name in operator_names:
+            op = self._operator_dict.get(name)
+            if op:
+                tools.extend(op.tools)
+        return tools
 
     def get_operator(self, name: str) -> ServiceOperator:
         return self._operator_dict.get(name)

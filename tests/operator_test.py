@@ -50,7 +50,7 @@ async def main():
     # 1. Connect to the service and create a session
     client = await DynamicAgentClient.create(
         setting="You are a helpful math assistant.",
-        server_addr="http://172.16.16.246:7777",
+        server_addr="http://localhost:7777",
     )
     print(f"Session created: {client.session_id}")
 

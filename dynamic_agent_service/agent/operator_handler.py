@@ -105,12 +105,41 @@ class OperatorHandler:
     def get_operator(self, name: str) -> ServiceOperator:
         return self._operator_dict.get(name)
 
-    async def execute(self, invoke_result: AgentInvokeResult):
+    async def execute(self, invoke_result: AgentInvokeResult) -> list[dict]:
         """
-        TO-CC: modify this block after implementation
-        this will init a openai style assistant object with tool_calls
-        then fake result openai style tool call result, just fake it match the E:\Project\_DynamicAgent\DynamicAgent\examples\one_operator.py
-        we will make it really execute later
+        Execute tool calls and return messages to append to conversation.
+        Returns a list with assistant message and tool result messages.
         """
-        pass
+        # Build assistant message with tool_calls in OpenAI format
+        assistant_message = {
+            "role": "assistant",
+            "content": invoke_result.full_text or None,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": tc.arguments
+                    }
+                }
+                for tc in invoke_result.tool_calls
+            ]
+        }
+
+        # Create fake tool results
+        tool_messages = []
+        for tc in invoke_result.tool_calls:
+            # Fake result matching the cross_product example
+            tool_message = {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": f"[ 9, 7, 1 ]"
+            }
+            tool_messages.append(tool_message)
+
+        logger.info(f"Assistant message: {assistant_message}")
+        logger.info(f"Tool messages: {tool_messages}")
+
+        return [assistant_message] + tool_messages
 

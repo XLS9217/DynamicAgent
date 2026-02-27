@@ -52,6 +52,8 @@ class AgentGeneralInterface:
         messages.append({"role": "system", "content": await self._forge_system_message()})
         messages.append({"role": "user", "content": message.get("text", "")})
 
+        full_assistant_text = ""
+
         #TO-DO: Later do a filter logic
         operator_names = list(self._operator_handler._operator_dict.keys())
         tools = self._operator_handler.get_tools(operator_names)
@@ -63,22 +65,29 @@ class AgentGeneralInterface:
             stream_callback=stream_callback,
         )
 
-        """
-        TO-CC: modify comment after implementation
-        change the logic enter the loop
-        if tool_calls empty, 
-        append one assistant message to messages
-        else execute will return a invoke result 
-        """
+        if invoke_response.full_text:
+            full_assistant_text += invoke_response.full_text
 
-        if invoke_response.tool_calls:
+        if not invoke_response.tool_calls:
+            # no tool calls, append assistant message and return
+            messages.append({"role": "assistant", "content": invoke_response.full_text})
+        else:
+            # execute tool calls and append messages
             logger.info(f"Tool calls: {invoke_response.tool_calls}")
+            execution_messages = await self._operator_handler.execute(invoke_response)
+            messages.extend(execution_messages)
 
+            # invoke again with updated messages to get final response
+            final_response = await self._response_handler.invoke(
+                messages=messages,
+                tools=tools,
+                stream_callback=stream_callback,
+            )
 
+            if final_response.full_text:
+                full_assistant_text += final_response.full_text
 
-
-
-        return invoke_response.full_text
+        return full_assistant_text
 
     def register_operator(self, operator_data: dict):
         self._operator_handler.register_operator(operator_data)

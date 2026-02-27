@@ -1,5 +1,6 @@
 import logging
 import uuid
+import requests
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
@@ -12,16 +13,29 @@ logger = get_my_logger()
 
 class RealtimeSession:
 
-    def __init__(self, setting: str):
+    def __init__(self, setting: str, webhook_url: str):
         self.session_id = str(uuid.uuid4())
         self.setting = setting
+        self.webhook_url = webhook_url
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
 
     async def agent_setup(self):
+
+        async def tool_execute(tool_call: AgentToolCall) -> str:
+            """POST tool_call to client webhook and return result."""
+            resp = requests.post(
+                self.webhook_url,
+                json=tool_call.model_dump(),
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.text
+
         self.agi = await AgentGeneralInterface.create(
             language_engine=None,
             setting=self.setting,
+            tool_execute=tool_execute,
         )
         logger.info("AGI initialized for session %s", self.session_id)
 
@@ -29,9 +43,7 @@ class RealtimeSession:
         self.client = client
 
     def register_operator(self, operator_data: dict):
-        """
-        Forward the serialized operator data to AGI for registration.
-        """
+        """Forward the serialized operator data to AGI for registration."""
         self.agi.register_operator(operator_data)
 
     async def listen(self):
@@ -50,26 +62,15 @@ class RealtimeSession:
 
         if msg_type == "invoke":
 
-            # only stream back text
             async def stream_callback(chunk: str):
                 resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=False)
                 await self.client.send_json(resp.model_dump())
-
-            async def tool_execute(toolcall_body: AgentToolCall):
-                """
-                send to client for execution
-                """
-                pass
 
             full_response = await self.agi.trigger(message, stream_callback=stream_callback)
 
             final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True)
             await self.client.send_json(final_chunk.model_dump())
 
-        elif msg_type == "tool_execute_result":
-            """
-            give to the operator
-            """
         else:
             logger.warning("unknown message type: %s", msg_type)
 
@@ -78,8 +79,8 @@ class RealtimeSessionManager:
     _sessions: dict[str, RealtimeSession] = {}
 
     @classmethod
-    def create(cls, setting: str) -> RealtimeSession:
-        session = RealtimeSession(setting)
+    def create(cls, setting: str, webhook_url: str) -> RealtimeSession:
+        session = RealtimeSession(setting, webhook_url)
         cls._sessions[session.session_id] = session
         return session
 

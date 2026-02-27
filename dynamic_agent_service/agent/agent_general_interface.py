@@ -42,9 +42,11 @@ class AgentGeneralInterface:
             cls,
             language_engine: LanguageEngine,
             setting: Union[str, Callable] = "",
+            tool_execute: Callable = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
+        agi._operator_handler.tool_execute = tool_execute
         return agi
 
     async def trigger(

@@ -72,6 +72,7 @@ class OperatorHandler:
 
     def __init__(self):
         self._operator_dict = {}
+        self.tool_execute = None  # async callable(AgentToolCall) -> str, set by AGI
 
     def register_operator(self, operator_data: dict):
         """
@@ -107,9 +108,19 @@ class OperatorHandler:
 
     async def execute(self, invoke_result: AgentInvokeResult) -> list[dict]:
         """
-        Execute tool calls and return messages to append to conversation.
-        Returns a list with assistant message and tool result messages.
+        Execute tool calls via webhook and return messages to append to conversation.
+        Returns [assistant_message, tool_message1, tool_message2, ...].
         """
+        # Parse operator names from tool names
+        # Tool name format: "{OperatorName}_{actual_tool_name}"
+        for tc in invoke_result.tool_calls:
+            # Find which operator this tool belongs to by checking prefixes
+            for op_name in self._operator_dict.keys():
+                if tc.name.startswith(f"{op_name}_"):
+                    tc.operator_name = op_name
+                    tc.name = tc.name[len(op_name) + 1:]  # strip "{OperatorName}_"
+                    break
+
         # Build assistant message with tool_calls in OpenAI format
         assistant_message = {
             "role": "assistant",
@@ -127,14 +138,14 @@ class OperatorHandler:
             ]
         }
 
-        # Create fake tool results
+        # Execute each tool call via webhook
         tool_messages = []
         for tc in invoke_result.tool_calls:
-            # Fake result matching the cross_product example
+            result = await self.tool_execute(tc)
             tool_message = {
                 "role": "tool",
                 "tool_call_id": tc.id,
-                "content": f"[ 9, 7, 1 ]"
+                "content": result
             }
             tool_messages.append(tool_message)
 

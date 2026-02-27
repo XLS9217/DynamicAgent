@@ -95,8 +95,6 @@ class OperatorHandler:
         debug_cache_json("operator_tools_all", self.get_tools(list(self._operator_dict.keys())))
         debug_cache_md("operator_menu_all", self.get_menu())
 
-
-
     def get_menu(self):
         """Return a combined menu string of all registered operators, separated by -----."""
         menus = [op.get_menu_item() for op in self._operator_dict.values()]

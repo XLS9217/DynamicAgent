@@ -5,3 +5,7 @@ class AgentToolCall(BaseModel):
     id: str
     name: str
     arguments: str #this must be json string
+
+class AgentInvokeResponse(BaseModel):
+    full_text: str
+    tool_calls: list[AgentToolCall]

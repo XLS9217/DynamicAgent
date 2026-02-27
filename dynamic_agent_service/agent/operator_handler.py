@@ -7,7 +7,7 @@ logger = get_my_logger()
 
 
 class ServiceOperator:
-    """
+    r"""
     This is the service-side operator for the dynamic_agent_client\src\operator\agent_operator_base.py
     this is for
     1. forwarding the tool call request to client, and let the operator execute and send back
@@ -65,14 +65,6 @@ class ServiceOperator:
 
         return "\n".join(lines)
 
-    async def execute(self, client_socket, tool_call: AgentToolCall):
-        """
-        Forward a tool call to the client via websocket and wait for the result.
-        """
-        # TODO: implement forwarding to client and collecting result
-        pass
-
-
 class OperatorHandler:
     """
     Manages the operator dictionary and registration.
@@ -112,3 +104,7 @@ class OperatorHandler:
 
     def get_operator(self, name: str) -> ServiceOperator:
         return self._operator_dict.get(name)
+
+    async def execute(self, tool_call: AgentToolCall) -> str:
+        pass
+

@@ -52,14 +52,19 @@ class AgentGeneralInterface:
         messages.append({"role": "system", "content": await self._forge_system_message()})
         messages.append({"role": "user", "content": message.get("text", "")})
 
+        operator_names = list(self._operator_handler._operator_dict.keys())
+        tools = self._operator_handler.get_tools(operator_names) if operator_names else None
+
         invoke_response = await self._response_handler.invoke(
             messages=messages,
+            tools=tools,
             stream_callback=stream_callback,
         )
 
-        # tool call loop will be here
+        if invoke_response.tool_calls:
+            logger.info(f"Tool calls: {invoke_response.tool_calls}")
 
-        return invoke_response
+        return invoke_response.full_text
 
     def register_operator(self, operator_data: dict):
         self._operator_handler.register_operator(operator_data)

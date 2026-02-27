@@ -12,3 +12,8 @@ class AgentResponseChunk(BaseModel):
     text: str
     tool_call: Optional[AgentToolCall] = None
     finished: bool = False
+
+class ToolExecuteResult(BaseModel):
+    type: Literal["tool_execute_result"]
+    tool_call_id: str
+    content: str

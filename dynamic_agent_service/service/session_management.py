@@ -3,6 +3,7 @@ import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
+from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
@@ -48,13 +49,27 @@ class RealtimeSession:
         msg_type = message.get("type")
 
         if msg_type == "invoke":
-            async def stream_callback(chunk: str, finished: bool = False):
-                resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=finished)
+
+            # only stream back text
+            async def stream_callback(chunk: str):
+                resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=False)
                 await self.client.send_json(resp.model_dump())
 
-            full_response = await self.agi.trigger(message, stream_callback=stream_callback)
-            await stream_callback("", finished=True)
+            async def tool_execute(toolcall_body: AgentToolCall):
+                """
+                send to client for execution
+                """
+                pass
 
+            full_response = await self.agi.trigger(message, stream_callback=stream_callback)
+
+            final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True)
+            await self.client.send_json(final_chunk.model_dump())
+
+        elif msg_type == "tool_execute_result":
+            """
+            give to the operator
+            """
         else:
             logger.warning("unknown message type: %s", msg_type)
 

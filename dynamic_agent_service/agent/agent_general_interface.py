@@ -47,7 +47,11 @@ class AgentGeneralInterface:
         agi._setting = setting
         return agi
 
-    async def trigger(self, message: dict, stream_callback=None) -> str:
+    async def trigger(
+        self,
+        message: dict,
+        stream_callback=None
+    ) -> str:
         messages = []
         messages.append({"role": "system", "content": await self._forge_system_message()})
         messages.append({"role": "user", "content": message.get("text", "")})

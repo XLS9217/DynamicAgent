@@ -52,7 +52,7 @@ class RealtimeSession:
                 resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=finished)
                 await self.client.send_json(resp.model_dump())
 
-            full_text = await self.agi.trigger(message, stream_callback=stream_callback)
+            full_response = await self.agi.trigger(message, stream_callback=stream_callback)
             await stream_callback("", finished=True)
 
         else:

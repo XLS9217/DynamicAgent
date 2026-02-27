@@ -6,6 +6,6 @@ class AgentToolCall(BaseModel):
     name: str
     arguments: str #this must be json string
 
-class AgentInvokeResponse(BaseModel):
+class AgentInvokeResult(BaseModel):
     full_text: str
     tool_calls: list[AgentToolCall]

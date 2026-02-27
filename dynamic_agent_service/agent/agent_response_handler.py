@@ -1,7 +1,7 @@
 from typing import Callable
 
 from dynamic_agent_service.agent.language_engine import LanguageEngine
-from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResponse
+from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
@@ -20,7 +20,7 @@ class AgentResponseHandler:
             messages: list,
             tools: list = None,
             stream_callback: Callable[[str], None] | None = None
-    ) -> AgentInvokeResponse:
+    ) -> AgentInvokeResult:
         """
         Handle streaming response flow.
 
@@ -73,14 +73,14 @@ class AgentResponseHandler:
         if not self.parallel_tool_calls and len(tool_calls) > 1:
             tool_calls = tool_calls[:1]
 
-        return AgentInvokeResponse(full_text=full_response, tool_calls=tool_calls)
+        return AgentInvokeResult(full_text=full_response, tool_calls=tool_calls)
 
     async def invoke(
             self,
             messages: list,
             tools: list = None,
             stream_callback: Callable[[str], None] | None = None,
-    ) -> AgentInvokeResponse:
+    ) -> AgentInvokeResult:
         """
         Invoke the response flow.
 

@@ -52,17 +52,31 @@ class AgentGeneralInterface:
         messages.append({"role": "system", "content": await self._forge_system_message()})
         messages.append({"role": "user", "content": message.get("text", "")})
 
+        #TO-DO: Later do a filter logic
         operator_names = list(self._operator_handler._operator_dict.keys())
-        tools = self._operator_handler.get_tools(operator_names) if operator_names else None
+        tools = self._operator_handler.get_tools(operator_names)
 
+        # initial invoke
         invoke_response = await self._response_handler.invoke(
             messages=messages,
             tools=tools,
             stream_callback=stream_callback,
         )
 
+        """
+        TO-CC: modify comment after implementation
+        change the logic enter the loop
+        if tool_calls empty, 
+        append one assistant message to messages
+        else execute will return a invoke result 
+        """
+
         if invoke_response.tool_calls:
             logger.info(f"Tool calls: {invoke_response.tool_calls}")
+
+
+
+
 
         return invoke_response.full_text
 

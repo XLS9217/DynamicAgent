@@ -1,5 +1,5 @@
 
-from dynamic_agent_service.agent.agent_structs import AgentToolCall
+from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.util.debug_cache_writer import debug_cache_json, debug_cache_md
 
@@ -105,6 +105,12 @@ class OperatorHandler:
     def get_operator(self, name: str) -> ServiceOperator:
         return self._operator_dict.get(name)
 
-    async def execute(self, tool_call: AgentToolCall) -> str:
+    async def execute(self, invoke_result: AgentInvokeResult):
+        """
+        TO-CC: modify this block after implementation
+        this will init a openai style assistant object with tool_calls
+        then fake result openai style tool call result, just fake it match the E:\Project\_DynamicAgent\DynamicAgent\examples\one_operator.py
+        we will make it really execute later
+        """
         pass
 

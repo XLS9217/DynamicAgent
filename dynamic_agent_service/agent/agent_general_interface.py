@@ -6,7 +6,6 @@ from dynamic_agent_service.agent.agent_response_handler import AgentResponseHand
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.agent.operator_handler import OperatorHandler
-from dynamic_agent_service.util.debug_cache_writer import debug_cache_json
 
 logger = get_my_logger()
 
@@ -36,7 +35,7 @@ class AgentGeneralInterface:
         self._setting = ""
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
-        self._operator_dict = {}
+        self._operator_handler = OperatorHandler()
 
     @classmethod
     async def create(
@@ -63,15 +62,7 @@ class AgentGeneralInterface:
         return invoke_response
 
     def register_operator(self, operator_data: dict):
-        """
-        Construct an OperatorHandler from the serialized operator data
-        and store it in _operator_dict keyed by name.
-        """
-        handler = OperatorHandler.from_serialized(operator_data)
-        self._operator_dict[handler.name] = handler
-        logger.info(f"Registered operator: {handler.tools}")
-
-        debug_cache_json(f"operator_{handler.name}", handler.raw_json)
+        self._operator_handler.register_operator(operator_data)
 
     async def _forge_system_message(self) -> str:
         if callable(self._setting):

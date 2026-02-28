@@ -32,7 +32,7 @@ class AgentResponseHandler:
         full_response = ""
         tool_calls_dict = {}
 
-        for chunk in self.llm_engine.stream_response(messages, tools=tools, parallel_tool_calls=self.parallel_tool_calls):
+        async for chunk in self.llm_engine.async_stream_response(messages, tools=tools, parallel_tool_calls=self.parallel_tool_calls):
             if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 import requests
@@ -26,13 +27,17 @@ class RealtimeSession:
             """POST tool_call to client webhook and return result."""
             payload = tool_call.model_dump()
             payload["session_id"] = self.session_id
-            resp = requests.post(
-                self.webhook_url,
-                json=payload,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.text
+
+            def _post():
+                resp = requests.post(
+                    self.webhook_url,
+                    json=payload,
+                    timeout=30,
+                )
+                resp.raise_for_status()
+                return resp.text
+
+            return await asyncio.to_thread(_post)
 
         self.agi = await AgentGeneralInterface.create(
             language_engine=None,

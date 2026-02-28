@@ -13,6 +13,8 @@ SYSTEM_MESSAGE_TEMPLATE = """
 Your setting is:
 {{setting}}
 
+{{operator_menu}}
+
 Overall LAW you MUST follow
 - gather enough knowledge before you do anything
 - reply rule:
@@ -64,34 +66,28 @@ class AgentGeneralInterface:
         operator_names = list(self._operator_handler._operator_dict.keys())
         tools = self._operator_handler.get_tools(operator_names)
 
-        # initial invoke
-        invoke_response = await self._response_handler.invoke(
-            messages=messages,
-            tools=tools,
-            stream_callback=stream_callback,
-        )
-
-        if invoke_response.full_text:
-            full_assistant_text += invoke_response.full_text
-
-        if not invoke_response.tool_calls:
-            # no tool calls, append assistant message and return
-            messages.append({"role": "assistant", "content": invoke_response.full_text})
-        else:
-            # execute tool calls and append messages
-            logger.info(f"Tool calls: {invoke_response.tool_calls}")
-            execution_messages = await self._operator_handler.execute(invoke_response)
-            messages.extend(execution_messages)
-
-            # invoke again with updated messages to get final response
-            final_response = await self._response_handler.invoke(
+        # Loop until no more tool calls are needed
+        while True:
+            # initial or subsequent invoke
+            invoke_response = await self._response_handler.invoke(
                 messages=messages,
                 tools=tools,
                 stream_callback=stream_callback,
             )
 
-            if final_response.full_text:
-                full_assistant_text += final_response.full_text
+            if invoke_response.full_text:
+                full_assistant_text += invoke_response.full_text
+
+            if not invoke_response.tool_calls:
+                # no tool calls, append assistant message (if any content) and break
+                if invoke_response.full_text:
+                    messages.append({"role": "assistant", "content": invoke_response.full_text})
+                break
+            else:
+                # execute tool calls and append messages
+                logger.info(f"Tool calls: {invoke_response.tool_calls}")
+                execution_messages = await self._operator_handler.execute(invoke_response)
+                messages.extend(execution_messages)
 
         return full_assistant_text
 
@@ -107,4 +103,6 @@ class AgentGeneralInterface:
         else:
             setting_str = self._setting
 
-        return self._system_message_template.replace("{{setting}}", setting_str)
+        operator_menu = self._operator_handler.get_menu()
+
+        return self._system_message_template.replace("{{setting}}", setting_str).replace("{{operator_menu}}", operator_menu)

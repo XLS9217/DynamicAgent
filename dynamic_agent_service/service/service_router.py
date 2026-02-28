@@ -13,6 +13,8 @@ class CreateSessionRequest(BaseModel):
     setting: str
     webhook_port: int
     messages: list = []
+    compact_limit: int = None
+    compact_target: int = None
 
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
@@ -21,7 +23,13 @@ async def create_session(body: CreateSessionRequest, request: Request):
     client_ip = request.client.host
     webhook_url = f"http://{client_ip}:{body.webhook_port}/webhook"
 
-    session = RealtimeSessionManager.create(setting=body.setting, webhook_url=webhook_url, messages=body.messages)
+    session = RealtimeSessionManager.create(
+        setting=body.setting,
+        webhook_url=webhook_url,
+        messages=body.messages,
+        compact_limit=body.compact_limit,
+        compact_target=body.compact_target,
+    )
     await session.agent_setup()
 
     scheme = request.headers.get("x-forwarded-proto", "http")

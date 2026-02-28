@@ -21,10 +21,12 @@ class RealtimeSession:
             cls._http = httpx.AsyncClient(mounts={"http://": None})
         return cls._http
 
-    def __init__(self, setting: str, webhook_url: str, messages: list = None):
+    def __init__(self, setting: str, webhook_url: str, messages: list = None, compact_limit: int = None, compact_target: int = None):
         self.session_id = str(uuid.uuid4())
         self.setting = setting
         self.messages = messages or []
+        self.compact_limit = compact_limit
+        self.compact_target = compact_target
         self.webhook_url = webhook_url
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
@@ -47,6 +49,8 @@ class RealtimeSession:
             language_engine=None,
             setting=self.setting,
             messages=self.messages,
+            compact_limit=self.compact_limit,
+            compact_target=self.compact_target,
             tool_execute=tool_execute,
         )
         logger.info("AGI initialized for session %s", self.session_id)
@@ -91,8 +95,8 @@ class RealtimeSessionManager:
     _sessions: dict[str, RealtimeSession] = {}
 
     @classmethod
-    def create(cls, setting: str, webhook_url: str, messages: list = None) -> RealtimeSession:
-        session = RealtimeSession(setting, webhook_url, messages=messages)
+    def create(cls, setting: str, webhook_url: str, messages: list = None, compact_limit: int = None, compact_target: int = None) -> RealtimeSession:
+        session = RealtimeSession(setting, webhook_url, messages=messages, compact_limit=compact_limit, compact_target=compact_target)
         cls._sessions[session.session_id] = session
         return session
 

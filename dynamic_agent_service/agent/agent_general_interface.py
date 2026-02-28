@@ -43,6 +43,8 @@ class AgentGeneralInterface:
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
         self._setting = ""
         self._messages = []
+        self._compact_limit = 40
+        self._compact_target = 20
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
         self._operator_handler = OperatorHandler()
@@ -53,11 +55,15 @@ class AgentGeneralInterface:
             language_engine: LanguageEngine,
             setting: str = "",
             messages: list = None,
+            compact_limit: int = 40,
+            compact_target: int = 20,
             tool_execute: Callable = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
         agi._messages = messages or []
+        agi._compact_limit = compact_limit
+        agi._compact_target = compact_target
         agi._operator_handler.tool_execute = tool_execute
         return agi
 
@@ -105,6 +111,11 @@ class AgentGeneralInterface:
                 execution_messages = await self._operator_handler.execute(invoke_response)
                 invoke_messages.extend(execution_messages)
 
+        # persist user and assistant messages for future triggers
+        self._messages.append({"role": "user", "content": message.get("text", "")})
+        if full_assistant_text:
+            self._messages.append({"role": "assistant", "content": full_assistant_text})
+
         return full_assistant_text
 
     def register_operator(self, operator_data: dict):
@@ -112,11 +123,15 @@ class AgentGeneralInterface:
 
     async def _forge_message_list(self, user_message: str) -> list:
         """
-        1. forge system message
-        2. append context messages
-        3. append user message
-        4. return the message list
+        1. compact messages if over limit
+        2. forge system message
+        3. append context messages
+        4. append user message
+        5. return the message list
         """
+        if len(self._messages) >= self._compact_limit:
+            await self._compact_messages()
+
         operator_menu = self._operator_handler.get_menu()
         system_content = self._system_message_template.replace("{{setting}}", self._setting).replace("{{operator_menu}}", operator_menu)
 
@@ -125,3 +140,22 @@ class AgentGeneralInterface:
             *self._messages,
             {"role": "user", "content": user_message}
         ]
+
+    async def _compact_messages(self):
+        keep_count = self._compact_target - 1
+        old = self._messages[:-keep_count]
+        keep = self._messages[-keep_count:]
+
+        summary_response = await self._response_handler.invoke(
+            messages=[
+                {"role": "system", "content": "Summarize the following conversation concisely. Preserve key facts, decisions, and context."},
+                *old,
+            ],
+            tools=[],
+        )
+
+        self._messages = [
+            {"role": "assistant", "content": f"Here is the previous conversation:\n{summary_response.full_text}"},
+            *keep,
+        ]
+        logger.info(f"Compacted messages: {len(old)} old -> 1 summary + {len(keep)} kept")

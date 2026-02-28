@@ -1,16 +1,4 @@
-import asyncio
-import sys
-import os
-from pathlib import Path
-from dotenv import load_dotenv
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-load_dotenv()
-
-from dynamic_agent_client.src.client import DynamicAgentClient
-
-messages = [
+ssd_chat = [
     {"role": "user", "content": "Hey, have you seen the SSD prices lately? They seem to be going up."},
     {"role": "assistant", "content": "Yeah, SSD prices have been climbing over the past few months. NAND flash supply has tightened."},
     {"role": "user", "content": "What's causing the supply shortage?"},
@@ -30,30 +18,3 @@ messages = [
     {"role": "user", "content": "Thanks, that's really helpful. I'll grab one this week."},
     {"role": "assistant", "content": "Good call. Keep an eye on deal sites too, flash sales still pop up occasionally."},
 ]
-
-
-async def main():
-    port = os.getenv("PORT", "7777")
-
-    await DynamicAgentClient.connect(server_addr=f"http://localhost:{port}")
-
-    client = await DynamicAgentClient.create(
-        setting="You are a knowledgeable hardware advisor.",
-        messages=messages,
-    )
-    print(f"Session created: {client.session_id}")
-
-    def on_stream(chunk: str):
-        print(chunk, end="", flush=True)
-
-    response = await client.trigger(
-        "Given our conversation, summarize the key takeaways about the SSD price situation in 3 bullet points.",
-        on_stream=on_stream,
-    )
-    print()
-
-    await client.close()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())

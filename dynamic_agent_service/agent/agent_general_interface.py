@@ -1,6 +1,5 @@
 import os
-import inspect
-from typing import Union, Callable
+from typing import Callable
 
 from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
 from dynamic_agent_service.agent.language_engine import LanguageEngine
@@ -43,6 +42,7 @@ class AgentGeneralInterface:
 
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
         self._setting = ""
+        self._messages = []
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
         self._operator_handler = OperatorHandler()
@@ -51,11 +51,13 @@ class AgentGeneralInterface:
     async def create(
             cls,
             language_engine: LanguageEngine,
-            setting: Union[str, Callable] = "",
+            setting: str = "",
+            messages: list = None,
             tool_execute: Callable = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
+        agi._messages = messages or []
         agi._operator_handler.tool_execute = tool_execute
         return agi
 
@@ -64,9 +66,7 @@ class AgentGeneralInterface:
         message: dict,
         stream_callback=None
     ) -> str:
-        messages = []
-        messages.append({"role": "system", "content": await self._forge_system_message()})
-        messages.append({"role": "user", "content": message.get("text", "")})
+        invoke_messages = await self._forge_message_list(message.get("text", ""))
 
         full_assistant_text = ""
 
@@ -76,17 +76,17 @@ class AgentGeneralInterface:
 
         # DEBUG
         debug_writer = DebugTriggerWriter()
-        debug_writer.put_system(messages[0]["content"])
+        debug_writer.put_system(invoke_messages[0]["content"])
         debug_writer.put_tools(tools)
 
         # Loop until no more tool calls are needed
         while True:
             # DEBUG: write new messages before invoke
-            debug_writer.put_invoke(messages)
+            debug_writer.put_invoke(invoke_messages)
 
             # initial or subsequent invoke
             invoke_response = await self._response_handler.invoke(
-                messages=messages,
+                messages=invoke_messages,
                 tools=tools,
                 stream_callback=stream_callback,
             )
@@ -97,28 +97,31 @@ class AgentGeneralInterface:
             if not invoke_response.tool_calls:
                 # no tool calls, append assistant message (if any content) and break
                 if invoke_response.full_text:
-                    messages.append({"role": "assistant", "content": invoke_response.full_text})
+                    invoke_messages.append({"role": "assistant", "content": invoke_response.full_text})
                 break
             else:
                 # execute tool calls and append messages
                 logger.info(f"Tool calls: {invoke_response.tool_calls}")
                 execution_messages = await self._operator_handler.execute(invoke_response)
-                messages.extend(execution_messages)
+                invoke_messages.extend(execution_messages)
 
         return full_assistant_text
 
     def register_operator(self, operator_data: dict):
         self._operator_handler.register_operator(operator_data)
 
-    async def _forge_system_message(self) -> str:
-        if callable(self._setting):
-            if inspect.iscoroutinefunction(self._setting):
-                setting_str = await self._setting()
-            else:
-                setting_str = self._setting()
-        else:
-            setting_str = self._setting
-
+    async def _forge_message_list(self, user_message: str) -> list:
+        """
+        1. forge system message
+        2. append context messages
+        3. append user message
+        4. return the message list
+        """
         operator_menu = self._operator_handler.get_menu()
+        system_content = self._system_message_template.replace("{{setting}}", self._setting).replace("{{operator_menu}}", operator_menu)
 
-        return self._system_message_template.replace("{{setting}}", setting_str).replace("{{operator_menu}}", operator_menu)
+        return [
+            {"role": "system", "content": system_content},
+            *self._messages,
+            {"role": "user", "content": user_message}
+        ]

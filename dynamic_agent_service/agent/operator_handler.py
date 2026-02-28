@@ -26,13 +26,10 @@ class ServiceOperator:
         """
         Construct a ServiceOperator from a serialized operator dict.
         Introduced in dynamic_agent_client/src/operator/agent_operator_base.py
+        Tool names arrive already prefixed from the client.
         """
         name = data["name"]
         tools = data.get("tools", [])
-        # prefix tool names so the agent can route calls back to the right operator
-        for tool in tools:
-            func = tool.get("function", {})
-            func["name"] = f"{name}_{func['name']}"
 
         handler = cls(
             name=name,
@@ -111,16 +108,6 @@ class OperatorHandler:
         Execute tool calls via webhook and return messages to append to conversation.
         Returns [assistant_message, tool_message1, tool_message2, ...].
         """
-        # Parse operator names from tool names
-        # Tool name format: "{OperatorName}_{actual_tool_name}"
-        for tc in invoke_result.tool_calls:
-            # Find which operator this tool belongs to by checking prefixes
-            for op_name in self._operator_dict.keys():
-                if tc.name.startswith(f"{op_name}_"):
-                    tc.operator_name = op_name
-                    tc.name = tc.name[len(op_name) + 1:]  # strip "{OperatorName}_"
-                    break
-
         # Build assistant message with tool_calls in OpenAI format
         assistant_message = {
             "role": "assistant",

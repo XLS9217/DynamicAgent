@@ -35,7 +35,7 @@ class MathOperator(AgentOperator):
         :param vector_a: The first vector
         :param vector_b: The second vector
         """
-        print(f"dot_product Received vectors: {vector_a} and {vector_b}")
+        # print(f"dot_product Received vectors: {vector_a} and {vector_b}")
         if len(vector_a) != len(vector_b):
             raise ValueError("Vectors must be the same length for dot product")
         return sum(a * b for a, b in zip(vector_a, vector_b))
@@ -46,7 +46,7 @@ class MathOperator(AgentOperator):
         :param vector_a: The first 3D vector
         :param vector_b: The second 3D vector
         """
-        print(f"cross_product Received vectors: {vector_a} and {vector_b}")
+        # print(f"cross_product Received vectors: {vector_a} and {vector_b}")
         if len(vector_a) != 3 or len(vector_b) != 3:
             raise ValueError("Cross product requires 3D vectors")
         a1, a2, a3 = vector_a
@@ -62,7 +62,7 @@ class MathOperator(AgentOperator):
         """
         :param vector: The vector
         """
-        print(f"magnitude Received vector: {vector}")
+        # print(f"magnitude Received vector: {vector}")
         return math.sqrt(sum(x * x for x in vector))
 
     @agent_tool(description="Compute arccosine of a value, returns angle in degrees")
@@ -70,7 +70,7 @@ class MathOperator(AgentOperator):
         """
         :param value: The cosine value (between -1 and 1)
         """
-        print(f"arccos Received value: {value}")
+        # print(f"arccos Received value: {value}")
         return math.degrees(math.acos(value))
 
 
@@ -137,11 +137,11 @@ async def main():
     print(f"Operator registered: {result}")
 
     # 3. Test cross then dot
-    # prompt, expected = generate_cross_then_dot_example()
-    # response = await client.trigger(prompt)
-    # print(f"Prompt: {prompt}")
-    # print(f"Expected: {expected}")
-    # print(f"Response: {response}\n")
+    prompt, expected = generate_cross_then_dot_example()
+    response = await client.trigger(prompt)
+    print(f"Prompt: {prompt}")
+    print(f"Expected: {expected}")
+    print(f"Response: {response}\n")
 
     # 4. Test triangle normal angle
     prompt, expected = generate_triangle_example()

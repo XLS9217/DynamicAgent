@@ -1,7 +1,6 @@
-import asyncio
 import logging
 import uuid
-import requests
+import httpx
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
@@ -13,6 +12,14 @@ logger = get_my_logger()
 
 
 class RealtimeSession:
+
+    _http: httpx.AsyncClient = None
+
+    @classmethod
+    def _get_http(cls) -> httpx.AsyncClient:
+        if cls._http is None:
+            cls._http = httpx.AsyncClient(mounts={"http://": None})
+        return cls._http
 
     def __init__(self, setting: str, webhook_url: str):
         self.session_id = str(uuid.uuid4())
@@ -27,17 +34,13 @@ class RealtimeSession:
             """POST tool_call to client webhook and return result."""
             payload = tool_call.model_dump()
             payload["session_id"] = self.session_id
-
-            def _post():
-                resp = requests.post(
-                    self.webhook_url,
-                    json=payload,
-                    timeout=30,
-                )
-                resp.raise_for_status()
-                return resp.text
-
-            return await asyncio.to_thread(_post)
+            resp = await self._get_http().post(
+                self.webhook_url,
+                json=payload,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            return resp.text
 
         self.agi = await AgentGeneralInterface.create(
             language_engine=None,

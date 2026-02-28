@@ -6,7 +6,7 @@ from dynamic_agent_service.agent.agent_response_handler import AgentResponseHand
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.agent.operator_handler import OperatorHandler
-from dynamic_agent_service.util.debug_cache_writer import debug_trigger_response
+from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 
 logger = get_my_logger()
 
@@ -74,8 +74,16 @@ class AgentGeneralInterface:
         operator_names = list(self._operator_handler._operator_dict.keys())
         tools = self._operator_handler.get_tools(operator_names)
 
+        # DEBUG
+        debug_writer = DebugTriggerWriter()
+        debug_writer.put_system(messages[0]["content"])
+        debug_writer.put_tools(tools)
+
         # Loop until no more tool calls are needed
         while True:
+            # DEBUG: write new messages before invoke
+            debug_writer.put_invoke(messages)
+
             # initial or subsequent invoke
             invoke_response = await self._response_handler.invoke(
                 messages=messages,
@@ -96,9 +104,6 @@ class AgentGeneralInterface:
                 logger.info(f"Tool calls: {invoke_response.tool_calls}")
                 execution_messages = await self._operator_handler.execute(invoke_response)
                 messages.extend(execution_messages)
-
-        # DEBUG LINE: comment out or delete
-        debug_trigger_response(messages, tools)
 
         return full_assistant_text
 

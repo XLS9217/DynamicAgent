@@ -6,14 +6,22 @@ from dynamic_agent_service.agent.agent_response_handler import AgentResponseHand
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.agent.operator_handler import OperatorHandler
+from dynamic_agent_service.util.debug_cache_writer import debug_trigger_response
 
 logger = get_my_logger()
 
 SYSTEM_MESSAGE_TEMPLATE = """
+
 Your setting is:
 {{setting}}
 
+
+For tool calling:
+1. Use the menu to execute the tool call
+2. Always use tool call instead of coming up with your own answer.
+Here is the operator menu:
 {{operator_menu}}
+
 
 Overall LAW you MUST follow
 - gather enough knowledge before you do anything
@@ -88,6 +96,9 @@ class AgentGeneralInterface:
                 logger.info(f"Tool calls: {invoke_response.tool_calls}")
                 execution_messages = await self._operator_handler.execute(invoke_response)
                 messages.extend(execution_messages)
+
+        # DEBUG LINE: comment out or delete
+        debug_trigger_response(messages, tools)
 
         return full_assistant_text
 

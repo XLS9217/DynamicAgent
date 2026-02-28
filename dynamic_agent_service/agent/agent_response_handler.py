@@ -2,6 +2,7 @@ from typing import Callable
 
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
+from dynamic_agent_service.service.service_structs import AgentResponseChunk
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
@@ -39,7 +40,7 @@ class AgentResponseHandler:
                 if hasattr(delta, 'content') and delta.content:
                     full_response += delta.content
                     if stream_callback:
-                        await stream_callback(delta.content)
+                        await stream_callback(AgentResponseChunk(type="agent_chunk", text=delta.content))
 
                 if hasattr(delta, 'tool_calls') and delta.tool_calls:
                     for tool_call_chunk in delta.tool_calls:

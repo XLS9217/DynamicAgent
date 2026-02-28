@@ -6,6 +6,7 @@ from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.agent.operator_handler import OperatorHandler
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
+from dynamic_agent_service.service.service_structs import AgentResponseChunk
 
 logger = get_my_logger()
 
@@ -99,6 +100,9 @@ class AgentGeneralInterface:
                 stream_callback=self._stream_callback,
             )
 
+            # signal invoked after each LLM call
+            await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", invoked=True))
+
             if invoke_response.full_text:
                 full_assistant_text += invoke_response.full_text
 
@@ -148,6 +152,8 @@ class AgentGeneralInterface:
         old = self._messages[:-keep_count]
         keep = self._messages[-keep_count:]
 
+        await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", compacting=True))
+
         summary_response = await self._response_handler.invoke(
             messages=[
                 {"role": "system", "content": "Summarize the following conversation concisely. Preserve key facts, decisions, and context."},
@@ -155,6 +161,8 @@ class AgentGeneralInterface:
             ],
             tools=[],
         )
+
+        await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", compacting=False))
 
         self._messages = [
             {"role": "assistant", "content": f"Here is the previous conversation:\n{summary_response.full_text}"},

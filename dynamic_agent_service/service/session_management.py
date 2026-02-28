@@ -58,9 +58,8 @@ class RealtimeSession:
     def attach_websocket(self, client: WebSocket):
         self.client = client
 
-        async def stream_callback(chunk: str):
-            resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=False)
-            await self.client.send_json(resp.model_dump())
+        async def stream_callback(chunk: AgentResponseChunk):
+            await self.client.send_json(chunk.model_dump())
 
         self.agi._stream_callback = stream_callback
 
@@ -86,7 +85,7 @@ class RealtimeSession:
 
             full_response = await self.agi.trigger(message)
 
-            final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True)
+            final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True, invoked=True)
             await self.client.send_json(final_chunk.model_dump())
 
         else:

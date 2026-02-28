@@ -45,6 +45,7 @@ class AgentGeneralInterface:
         self._messages = []
         self._compact_limit = 40
         self._compact_target = 20
+        self._stream_callback = None
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
         self._operator_handler = OperatorHandler()
@@ -58,19 +59,20 @@ class AgentGeneralInterface:
             compact_limit: int = 40,
             compact_target: int = 20,
             tool_execute: Callable = None,
+            stream_callback: Callable = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
         agi._messages = messages or []
         agi._compact_limit = compact_limit
         agi._compact_target = compact_target
+        agi._stream_callback = stream_callback
         agi._operator_handler.tool_execute = tool_execute
         return agi
 
     async def trigger(
         self,
         message: dict,
-        stream_callback=None
     ) -> str:
         invoke_messages = await self._forge_message_list(message.get("text", ""))
 
@@ -94,7 +96,7 @@ class AgentGeneralInterface:
             invoke_response = await self._response_handler.invoke(
                 messages=invoke_messages,
                 tools=tools,
-                stream_callback=stream_callback,
+                stream_callback=self._stream_callback,
             )
 
             if invoke_response.full_text:

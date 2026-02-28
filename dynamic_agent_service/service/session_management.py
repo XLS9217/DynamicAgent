@@ -58,6 +58,12 @@ class RealtimeSession:
     def attach_websocket(self, client: WebSocket):
         self.client = client
 
+        async def stream_callback(chunk: str):
+            resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=False)
+            await self.client.send_json(resp.model_dump())
+
+        self.agi._stream_callback = stream_callback
+
     def register_operator(self, operator_data: dict):
         """Forward the serialized operator data to AGI for registration."""
         self.agi.register_operator(operator_data)
@@ -78,11 +84,7 @@ class RealtimeSession:
 
         if msg_type == "invoke":
 
-            async def stream_callback(chunk: str):
-                resp = AgentResponseChunk(type="agent_chunk", text=chunk, finished=False)
-                await self.client.send_json(resp.model_dump())
-
-            full_response = await self.agi.trigger(message, stream_callback=stream_callback)
+            full_response = await self.agi.trigger(message)
 
             final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True)
             await self.client.send_json(final_chunk.model_dump())

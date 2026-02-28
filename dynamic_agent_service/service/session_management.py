@@ -24,9 +24,11 @@ class RealtimeSession:
 
         async def tool_execute(tool_call: AgentToolCall) -> str:
             """POST tool_call to client webhook and return result."""
+            payload = tool_call.model_dump()
+            payload["session_id"] = self.session_id
             resp = requests.post(
                 self.webhook_url,
-                json=tool_call.model_dump(),
+                json=payload,
                 timeout=30,
             )
             resp.raise_for_status()

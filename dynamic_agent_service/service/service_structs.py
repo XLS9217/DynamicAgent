@@ -13,7 +13,7 @@ class AgentResponseChunk(BaseModel):
     tool_call: Optional[AgentToolCall] = None
     finished: bool = False
     invoked: bool = False
-    compacting: bool = False
+    compacting: Optional[bool] = None # Three state None True False
 
 class ToolExecuteResult(BaseModel):
     type: Literal["tool_execute_result"]

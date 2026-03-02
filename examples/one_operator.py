@@ -1,16 +1,12 @@
 """
-uv run -m dynamic_agent_client.examples.one_operator
+uv run examples/one_operator.py
 """
 import asyncio
 import json
-import sys
 import math
 import random
 import os
-from pathlib import Path
 from dotenv import load_dotenv
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 load_dotenv()
 

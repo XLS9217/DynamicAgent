@@ -1,16 +1,12 @@
 """
-uv run -m dynamic_agent_client.examples.message_list
+uv run examples/message_list.py
 """
 import asyncio
-import sys
 import os
-from pathlib import Path
 from dotenv import load_dotenv
 
-from dynamic_agent_client.examples.test_messages import ssd_chat
+from examples.test_messages import ssd_chat
 from dynamic_agent_client import DynamicAgentClient
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 load_dotenv()
 

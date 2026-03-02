@@ -144,15 +144,21 @@ name = "dynamic-agent-client"
 version = "0.1.0"
 source = { editable = "dynamic_agent_client" }
 dependencies = [
+    { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "requests" },
+    { name = "uvicorn" },
     { name = "websockets" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "requests", specifier = ">=2.32" },
+    { name = "uvicorn", specifier = ">=0.30" },
     { name = "websockets", specifier = ">=12.0" },
 ]
 

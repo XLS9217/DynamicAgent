@@ -1,11 +1,11 @@
 """
-uv run -m dynamic_agent_client.examples.message_compact
+uv run examples/message_compact.py
 """
 import asyncio
 import os
 from dotenv import load_dotenv
 
-from dynamic_agent_client.examples.test_messages import ssd_chat_cn_79
+from examples.test_messages import ssd_chat_cn_79
 from dynamic_agent_client import DynamicAgentClient
 
 load_dotenv()

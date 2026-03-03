@@ -11,7 +11,7 @@ class DataAccessor(ABC):
 
     @classmethod
     @abstractmethod
-    async def _ensure_tables_exist(cls) -> bool:
+    async def ensure_tables_exist(cls) -> bool:
         """
         Create required database tables/collections if they don't exist.
 

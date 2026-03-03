@@ -2,34 +2,17 @@ from fastapi import APIRouter, WebSocket, HTTPException, Request
 from pydantic import BaseModel
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
+from dynamic_agent_service.service.service_structs import CreateSessionRequest
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
 
 router = APIRouter()
 
-
-class CreateSessionRequest(BaseModel):
-    setting: str
-    webhook_port: int
-    messages: list = []
-    compact_limit: int = None
-    compact_target: int = None
-
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
-
-    # Extract client IP and construct webhook URL
-    client_ip = request.client.host
-    webhook_url = f"http://{client_ip}:{body.webhook_port}/webhook"
-
-    session = RealtimeSessionManager.create(
-        setting=body.setting,
-        webhook_url=webhook_url,
-        messages=body.messages,
-        compact_limit=body.compact_limit,
-        compact_target=body.compact_target,
-    )
+    webhook_url = f"http://{request.client.host}:{body.webhook_port}/webhook"
+    session = RealtimeSessionManager.create(request=body, webhook_url=webhook_url)
     await session.agent_setup()
 
     scheme = request.headers.get("x-forwarded-proto", "http")

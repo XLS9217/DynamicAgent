@@ -5,7 +5,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
-from dynamic_agent_service.service.service_structs import AgentResponseChunk
+from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
@@ -96,8 +96,14 @@ class RealtimeSessionManager:
     _sessions: dict[str, RealtimeSession] = {}
 
     @classmethod
-    def create(cls, setting: str, webhook_url: str, messages: list = None, compact_limit: int = None, compact_target: int = None) -> RealtimeSession:
-        session = RealtimeSession(setting, webhook_url, messages=messages, compact_limit=compact_limit, compact_target=compact_target)
+    def create(cls, request: CreateSessionRequest, webhook_url: str) -> RealtimeSession:
+        session = RealtimeSession(
+            setting=request.setting,
+            webhook_url=webhook_url,
+            messages=request.messages,
+            compact_limit=request.compact_limit,
+            compact_target=request.compact_target
+        )
         cls._sessions[session.session_id] = session
         return session
 

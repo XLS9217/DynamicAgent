@@ -36,7 +36,7 @@ async def agent_session(websocket: WebSocket, session_id: str):
     try:
         await session.listen()
     finally:
-        RealtimeSessionManager.remove(session)
+        RealtimeSessionManager.mark_disconnected(session)
         logger.info("WebSocket cleaned up for session %s", session_id)
 
 

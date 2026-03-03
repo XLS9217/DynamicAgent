@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 import uuid
 import httpx
 from fastapi import WebSocket, WebSocketDisconnect
@@ -21,13 +23,15 @@ class RealtimeSession:
             cls._http = httpx.AsyncClient(mounts={"http://": None})
         return cls._http
 
-    def __init__(self, setting: str, webhook_url: str, messages: list = None, compact_limit: int = None, compact_target: int = None):
+    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, messages: list = None, compact_limit: int = None, compact_target: int = None):
         self.session_id = str(uuid.uuid4())
         self.setting = setting
         self.messages = messages or []
         self.compact_limit = compact_limit
         self.compact_target = compact_target
         self.webhook_url = webhook_url
+        self.reconnect_keep = reconnect_keep
+        self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
 
@@ -57,6 +61,7 @@ class RealtimeSession:
 
     def attach_websocket(self, client: WebSocket):
         self.client = client
+        self.disconnect_time = None
 
         async def stream_callback(chunk: AgentResponseChunk):
             await self.client.send_json(chunk.model_dump())
@@ -66,6 +71,10 @@ class RealtimeSession:
     def register_operator(self, operator_data: dict):
         """Forward the serialized operator data to AGI for registration."""
         self.agi.register_operator(operator_data)
+
+    def is_expired(self) -> bool:
+        """Check if session has been disconnected longer than reconnect_keep seconds."""
+        return self.disconnect_time is not None and time.time() - self.disconnect_time > self.reconnect_keep
 
     async def listen(self):
         try:
@@ -94,17 +103,20 @@ class RealtimeSession:
 
 class RealtimeSessionManager:
     _sessions: dict[str, RealtimeSession] = {}
+    _cleanup_task: asyncio.Task | None = None
 
     @classmethod
     def create(cls, request: CreateSessionRequest, webhook_url: str) -> RealtimeSession:
         session = RealtimeSession(
             setting=request.setting,
             webhook_url=webhook_url,
+            reconnect_keep=request.reconnect_keep,
             messages=request.messages,
             compact_limit=request.compact_limit,
             compact_target=request.compact_target
         )
         cls._sessions[session.session_id] = session
+        cls._ensure_cleanup_task()
         return session
 
     @classmethod
@@ -112,5 +124,28 @@ class RealtimeSessionManager:
         return cls._sessions.get(session_id)
 
     @classmethod
-    def remove(cls, session: RealtimeSession):
-        cls._sessions.pop(session.session_id, None)
+    def mark_disconnected(cls, session: RealtimeSession):
+        """Mark session as disconnected, starts reconnect_keep countdown."""
+        session.disconnect_time = time.time()
+        logger.info("Session %s marked disconnected, will expire in %s seconds", session.session_id, session.reconnect_keep)
+
+    @classmethod
+    def cleanup_expired(cls):
+        """Remove sessions that have been disconnected longer than reconnect_keep."""
+        expired = [sid for sid, session in cls._sessions.items() if session.is_expired()]
+        for sid in expired:
+            cls._sessions.pop(sid, None)
+            logger.info("Session %s expired and removed", sid)
+
+    @classmethod
+    def _ensure_cleanup_task(cls):
+        """Start background cleanup task if not already running."""
+        if cls._cleanup_task is None or cls._cleanup_task.done():
+            cls._cleanup_task = asyncio.create_task(cls._cleanup_loop())
+
+    @classmethod
+    async def _cleanup_loop(cls):
+        """Background task that runs cleanup_expired every 10 seconds."""
+        while True:
+            await asyncio.sleep(10)
+            cls.cleanup_expired()

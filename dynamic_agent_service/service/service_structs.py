@@ -8,6 +8,7 @@ class CreateSessionRequest(BaseModel):
     # Session
     setting: str
     webhook_port: int
+    reconnect_keep: int = 30
     # Agent
     messages: list = []
     compact_limit: int = None

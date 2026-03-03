@@ -7,8 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "dynamic-agent-client",
     "dynamic-agent-service",
-    "python-dotenv>=1.2.1",
-    "websocket",
 ]
 
 [tool.uv.workspace]

@@ -10,6 +10,10 @@ dependencies = [
     "pyjwt>=2.8",
     "pydantic>=2.0",
     "colorama>=0.4",
+    "python-dotenv>=1.2.1",
+    "qdrant-client>=1.17.0",
+    "websocket",
+    "asyncpg>=0.31.0",
 ]
 
 [build-system]

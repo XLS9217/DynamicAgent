@@ -52,6 +52,7 @@ class AgentGeneralInterface:
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
         self._operator_handler = OperatorHandler()
+        self._session_logger = None
 
     @classmethod
     async def create(
@@ -63,6 +64,7 @@ class AgentGeneralInterface:
             compact_target: int = 20,
             tool_execute: Callable = None,
             stream_callback: Callable = None,
+            session_logger = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
@@ -71,6 +73,7 @@ class AgentGeneralInterface:
         agi._compact_target = compact_target
         agi._stream_callback = stream_callback
         agi._operator_handler.tool_execute = tool_execute
+        agi._session_logger = session_logger
         return agi
 
     async def trigger(
@@ -89,6 +92,9 @@ class AgentGeneralInterface:
         debug_writer = DebugTriggerWriter()
         debug_writer.put_system(invoke_messages[0]["content"])
         debug_writer.put_tools(tools)
+
+        # Session logging: start new trigger with tools and initial messages
+        self._session_logger.trigger_new(tools, invoke_messages)
 
         # Loop until no more tool calls are needed
         while True:
@@ -112,12 +118,15 @@ class AgentGeneralInterface:
                 # no tool calls, append assistant message (if any content) and break
                 if invoke_response.full_text:
                     invoke_messages.append({"role": "assistant", "content": invoke_response.full_text})
+                    self._session_logger.trigger_log({"role": "assistant", "content": invoke_response.full_text})
                 break
             else:
                 # execute tool calls and append messages
                 logger.info(f"Tool calls: {invoke_response.tool_calls}")
                 execution_messages = await self._operator_handler.execute(invoke_response)
                 invoke_messages.extend(execution_messages)
+                for msg in execution_messages:
+                    self._session_logger.trigger_log(msg)
 
         # persist user and assistant messages for future triggers
         self._messages.append({"role": "user", "content": message.get("text", "")})
@@ -171,3 +180,11 @@ class AgentGeneralInterface:
             *keep,
         ]
         logger.info(f"Compacted messages: {len(old)} old -> 1 summary + {len(keep)} kept")
+
+        # Log compaction event
+        self._session_logger.trigger_log({
+            "type": "compaction",
+            "old_count": len(old),
+            "kept_count": len(keep),
+            "summary": summary_response.full_text
+        })

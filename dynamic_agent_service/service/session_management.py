@@ -9,6 +9,7 @@ from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInte
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest
 from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.util.SessionLogger import SessionLogger
 
 logger = get_my_logger()
 
@@ -34,6 +35,7 @@ class RealtimeSession:
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
+        self.session_logger = SessionLogger(self.session_id)
 
     async def agent_setup(self):
 
@@ -56,8 +58,16 @@ class RealtimeSession:
             compact_limit=self.compact_limit,
             compact_target=self.compact_target,
             tool_execute=tool_execute,
+            session_logger=self.session_logger,
         )
         logger.info("AGI initialized for session %s", self.session_id)
+        # Log session initialization (one log per setting, fire-and-forget)
+        self.session_logger.log("setting", {"key": "session_id", "value": self.session_id})
+        self.session_logger.log("setting", {"key": "setting", "value": self.setting})
+        self.session_logger.log("setting", {"key": "compact_limit", "value": self.compact_limit})
+        self.session_logger.log("setting", {"key": "compact_target", "value": self.compact_target})
+        self.session_logger.log("setting", {"key": "webhook_url", "value": self.webhook_url})
+        self.session_logger.log("setting", {"key": "reconnect_keep", "value": self.reconnect_keep})
 
     def attach_websocket(self, client: WebSocket):
         self.client = client

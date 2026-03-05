@@ -14,6 +14,7 @@ dependencies = [
     "qdrant-client>=1.17.0",
     "websocket",
     "asyncpg>=0.31.0",
+    "aiofiles>=25.1.0",
 ]
 
 [build-system]

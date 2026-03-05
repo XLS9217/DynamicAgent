@@ -77,28 +77,37 @@ class RealtimeSession:
         return self.disconnect_time is not None and time.time() - self.disconnect_time > self.reconnect_keep
 
     async def listen(self):
+        """Keep WebSocket alive for receiving messages (if needed in future)."""
         try:
             while True:
                 message = await self.client.receive_json()
                 logger.info("received message %s", message)
-                await self.handle_message(message)
         except WebSocketDisconnect:
             logger.info("WebSocketDisconnect")
         except Exception as e:
             logger.error("Error: %s", e)
 
-    async def handle_message(self, message: dict):
-        msg_type = message.get("type")
+    async def trigger_agent(self, text: str):
+        """Trigger agent with text input. Response streams via WebSocket."""
+        if self.client is None:
+            raise RuntimeError("WebSocket not connected")
 
-        if msg_type == "invoke":
+        # Start processing in background, return immediately
+        asyncio.create_task(self._process_trigger(text))
 
-            full_response = await self.agi.trigger(message)
+    async def _process_trigger(self, text: str):
+        """Background task to process trigger and stream response."""
+        try:
+            message = {"type": "invoke", "text": text}
+            await self.agi.trigger(message)
 
+            # Send final chunk
             final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True, invoked=True)
             await self.client.send_json(final_chunk.model_dump())
-
-        else:
-            logger.warning("unknown message type: %s", msg_type)
+        except Exception as e:
+            logger.error("Error processing trigger: %s", e)
+            error_chunk = AgentResponseChunk(type="agent_chunk", text="Error Occurred", finished=True, invoked=True)
+            await self.client.send_json(error_chunk.model_dump())
 
 
 class RealtimeSessionManager:

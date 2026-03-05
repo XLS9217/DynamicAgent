@@ -57,6 +57,22 @@ async def register_operator(body: RegisterOperatorRequest):
     return {"status": "ok", "operator_name": body.operator.get("name")}
 
 
+class TriggerRequest(BaseModel):
+    session_id: str
+    text: str
+
+@router.post("/trigger")
+async def trigger(body: TriggerRequest):
+    """
+    Trigger agent with text input. Response streams via WebSocket.
+    """
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await session.trigger_agent(body.text)
+    return {"status": "accepted"}
+
+
 
 @router.websocket("/echo")
 async def echo(websocket: WebSocket):

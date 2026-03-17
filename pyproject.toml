@@ -7,7 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "dynamic-agent-client",
     "dynamic-agent-service",
-    "pymilvus[milvus-lite]>=2.6.10",
 ]
 
 [tool.uv.workspace]

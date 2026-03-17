@@ -7,7 +7,7 @@ logger = get_my_logger()
 
 class LanguageEngine:
 
-    def __init__(self, api_key: str, base_url: str, model: str = "qwen3-max"):
+    def __init__(self, api_key: str, base_url: str, model: str):
         """
         Initialize the LLM Engine with API credentials
 

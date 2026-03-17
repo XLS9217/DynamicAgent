@@ -38,9 +38,9 @@ class AgentGeneralInterface:
         self.llm_engine = llm_engine
         if self.llm_engine is None:
             self.llm_engine = LanguageEngine(
-                api_key=os.getenv("API_KEY"),
-                base_url=os.getenv("BASE_URL"),
-                model=os.getenv("MODEL_NAME")
+                api_key=os.getenv("LLM_API_KEY"),
+                base_url=os.getenv("LLM_BASE_URL"),
+                model=os.getenv("LLM_NAME")
             )
 
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE

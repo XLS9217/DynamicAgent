@@ -81,3 +81,29 @@ class LanguageEngine:
 
         async for chunk in completion:
             yield chunk
+
+    async def async_get_response(
+            self,
+            messages: list,
+            tools: list = None,
+            parallel_tool_calls: bool = False
+    ) -> str:
+        """
+        Generate an async blocking response from the LLM
+
+        :param messages: List of message dicts in OpenAI format (including system message)
+        :param tools: Optional list of tools in OpenAI function calling format
+        :param parallel_tool_calls: Whether to allow parallel tool calls (default: False)
+        :return: Complete response text
+        """
+        kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "parallel_tool_calls": parallel_tool_calls
+        }
+        if tools:
+            kwargs["tools"] = tools
+
+        response = await self.async_client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content

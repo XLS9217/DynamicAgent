@@ -3,7 +3,7 @@ class KnowledgeAccessor:
     def __init__(self):
         pass
 
-    def create_entity(self):
+    def create_blueprint(self):
         pass
 
     def inbound(self):

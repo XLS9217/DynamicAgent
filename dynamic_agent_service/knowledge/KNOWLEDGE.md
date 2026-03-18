@@ -20,3 +20,8 @@ when the agent is answering the question,
     if the agent needs more information, it will use the id to get the rest of knowledge node 
 
 
+
+terms
+- knowledge text is what we create from input data
+
+

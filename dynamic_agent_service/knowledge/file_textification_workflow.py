@@ -17,7 +17,7 @@ Output format:
 """
 
 
-class KnowledgeExtractionWorkflow:
+class FileTextificationWorkflow:
     def __init__(self, vision_engine: VisionEngine, images: list[Image.Image]):
         self.vision_engine = vision_engine
         self.images = images

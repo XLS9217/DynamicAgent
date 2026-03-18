@@ -10,12 +10,12 @@ from dotenv import load_dotenv
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.vision_engine import VisionEngine
 from dynamic_agent_service.util.file_process import pdf_to_images
-from dynamic_agent_service.workflow.knowledge_extraction_workflow import KnowledgeExtractionWorkflow
+from knowledge.file_textification_workflow import FileTextificationWorkflow
 
 load_dotenv()
 
-PDF_PATH = r"E:\Project\_DynamicAgent\data\Products\AirLink\AirLink隔空投屏产品介绍 v1.9.pdf"
-CACHE_DIR = os.getenv("CHCHE_DIR", r"E:\Project\_DynamicAgent\cache")
+PDF_PATH = os.getenv("TEST_PDF_PATH")
+CACHE_DIR = os.getenv("CHCHE_DIR")
 
 
 async def get_attr_desc(llm_engine: LanguageEngine, query: str) -> tuple[str, dict[str, str]]:
@@ -63,7 +63,7 @@ async def main():
     print(f"Converted {len(images)} pages")
 
     # Extract text from images (parallel)
-    raw_knowledge = await KnowledgeExtractionWorkflow(vision_engine, images).execute()
+    raw_knowledge = await FileTextificationWorkflow(vision_engine, images).execute()
     print(f"Extracted {len(raw_knowledge)} characters")
 
     # Save merged text

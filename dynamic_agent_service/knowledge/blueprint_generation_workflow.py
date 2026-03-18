@@ -1,0 +1,114 @@
+"""
+Generate blueprint schema (description + attribute:description pairs) from a query
+"""
+import json
+
+from dynamic_agent_service.agent.language_engine import LanguageEngine
+from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
+from workflow.json_fix_workflow import JsonFixWorkflow
+
+GENERATE_PROMPT = """Based on this user query, generate a reusable blueprint schema:
+
+User Query: {query}
+
+Output ONLY valid JSON in this format:
+{{
+  "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
+  "attributes": {{
+    "attribute_name": "description of what this attribute represents",
+    ...
+  }}
+}}
+
+Rules:
+- Description must be general and reusable, not specific to any particular instance
+- Attribute names must be in English, lowercase, using underscores
+- Keep descriptions concise"""
+
+VALIDATE_PROMPT = """Review this blueprint schema for quality:
+
+User Query: {query}
+
+Blueprint:
+{blueprint}
+
+Check:
+1. Is the description general and reusable (not specific to any instance)?
+2. Are attribute names in English, lowercase, with underscores?
+3. Are attributes relevant and sufficient for the query?
+4. Are attribute descriptions clear and concise?
+
+If ALL checks pass, respond with ONLY: YES
+If ANY check fails, respond with ONLY: NO
+<issues>
+- issue 1
+- issue 2
+</issues>"""
+
+REFINE_PROMPT = """Fix the following blueprint schema:
+
+Issues:
+{issues}
+
+Original blueprint:
+{blueprint}
+
+Output ONLY valid JSON in the same format."""
+
+
+class BlueprintGenerationWorkflow:
+    MAX_RETRIES = 2
+
+    def __init__(self, language_engine: LanguageEngine, query: str):
+        self.language_engine = language_engine
+        self.query = query
+
+    async def _generate(self) -> dict:
+        prompt = GENERATE_PROMPT.format(query=self.query)
+        raw = await self.language_engine.async_get_response(
+            [{"role": "user", "content": prompt}]
+        )
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return await JsonFixWorkflow(self.language_engine, raw).execute()
+
+    async def _validate(self, blueprint: dict) -> str | None:
+        """Returns None if valid, issues string if not"""
+        prompt = VALIDATE_PROMPT.format(
+            query=self.query,
+            blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
+        )
+        result = await self.language_engine.async_get_response(
+            [{"role": "user", "content": prompt}]
+        )
+        if result.strip().startswith("YES"):
+            return None
+        return result
+
+    async def _refine(self, blueprint: dict, issues: str) -> dict:
+        prompt = REFINE_PROMPT.format(
+            issues=issues,
+            blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
+        )
+        raw = await self.language_engine.async_get_response(
+            [{"role": "user", "content": prompt}]
+        )
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return await JsonFixWorkflow(self.language_engine, raw).execute()
+
+    async def execute(self) -> Blueprint:
+        """
+        Orchestrator: generate -> validate -> refine (max 2 retries)
+        """
+        blueprint = await self._generate()
+
+        for _ in range(self.MAX_RETRIES):
+            issues = await self._validate(blueprint)
+            if issues is None:
+                break
+            blueprint = await self._refine(blueprint, issues)
+
+        return Blueprint(**blueprint)

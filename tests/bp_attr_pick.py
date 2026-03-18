@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.vision_engine import VisionEngine
-from dynamic_agent_service.knowledge.file_textification_workflow import FileTextificationWorkflow
-from dynamic_agent_service.knowledge.blueprint_generation_workflow import BlueprintGenerationWorkflow
+from workflow.file_textification_workflow import FileTextificationWorkflow
+from workflow.blueprint_generation_workflow import BlueprintGenerationWorkflow
 
 load_dotenv()
 

@@ -6,13 +6,15 @@ import json
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
 from workflow.json_fix_workflow import JsonFixWorkflow
+from workflow.workflow_base import WorkflowBase
 
 GENERATE_PROMPT = """Based on this user query, generate a reusable blueprint schema:
 
 User Query: {query}
-
+{raw_text_section}
 Output ONLY valid JSON in this format:
 {{
+  "name": "short_snake_case_name for this blueprint type",
   "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
   "attributes": {{
     "attribute_name": "description of what this attribute represents",
@@ -56,15 +58,20 @@ Original blueprint:
 Output ONLY valid JSON in the same format."""
 
 
-class BlueprintGenerationWorkflow:
+class BlueprintGenerationWorkflow(WorkflowBase):
     MAX_RETRIES = 2
 
-    def __init__(self, language_engine: LanguageEngine, query: str):
+    def __init__(self, language_engine: LanguageEngine, query: str, raw_text: str = None):
+        super().__init__()
         self.language_engine = language_engine
         self.query = query
+        self.raw_text = raw_text
 
     async def _generate(self) -> dict:
-        prompt = GENERATE_PROMPT.format(query=self.query)
+        raw_text_section = ""
+        if self.raw_text:
+            raw_text_section = f"\nReference Text:\n{self.raw_text}\n"
+        prompt = GENERATE_PROMPT.format(query=self.query, raw_text_section=raw_text_section)
         raw = await self.language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )

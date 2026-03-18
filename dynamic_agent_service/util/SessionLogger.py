@@ -16,7 +16,7 @@ class SessionLogger:
         use .env to find cache folder, everything says in CACHE_FOLDER_PATH/session_log/session_id/file.log
         """
         self.session_id = session_id
-        cache_folder = os.getenv("CHCHE_DIR")
+        cache_folder = os.getenv("CACHE_DIR")
         self.log_dir = Path(cache_folder) / "session_log" / session_id
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.trigger_count = 0

@@ -15,7 +15,7 @@ from workflow.blueprint_generation_workflow import BlueprintGenerationWorkflow
 load_dotenv()
 
 PDF_PATH = os.getenv("TEST_PDF_PATH")
-CACHE_DIR = os.getenv("CHCHE_DIR")
+CACHE_DIR = os.getenv("CACHE_DIR")
 
 
 async def main():

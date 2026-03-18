@@ -67,7 +67,7 @@ sequenceDiagram
 
 # Logging
 Rules for logging (implemented in `SessionLogger`):
-- All logs are stored in the directory defined by `CHCHE_DIR` environment variable.
+- All logs are stored in the directory defined by `CACHE_DIR` environment variable.
 - Logs are organized by session: `CACHE_DIR/session_log/{session_id}/`.
 - Logs are stored in JSONL format with a `timestamp` field.
 - **`setting.jsonl`**: Stores session configuration and initial settings.

@@ -19,7 +19,7 @@ class DebugTriggerWriter:
     def __init__(self):
         self._last_index = 0
         self._invoke_count = 0
-        cache_dir = os.getenv("CHCHE_DIR")
+        cache_dir = os.getenv("CACHE_DIR")
         if not cache_dir:
             self._file_path = None
             return

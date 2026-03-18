@@ -3,7 +3,6 @@ Fill blueprint attributes with actual values from raw knowledge
 """
 import json
 
-from dynamic_agent_service.agent.language_engine import LanguageEngine
 from workflow.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
@@ -20,12 +19,15 @@ Values MUST be in the same language as the raw knowledge."""
 
 
 class BlueprintFillingWorkflow(WorkflowBase):
-
-    def __init__(self, language_engine: LanguageEngine, attribute_schema: dict[str, str], raw_knowledge: str):
+    def __init__(self):
         super().__init__()
-        self.language_engine = language_engine
+        self.attribute_schema = {}
+        self.raw_knowledge = ""
+
+    async def build(self, attribute_schema: dict[str, str], raw_knowledge: str):
         self.attribute_schema = attribute_schema
         self.raw_knowledge = raw_knowledge
+        return self
 
     async def execute(self) -> dict[str, str]:
         prompt = FILL_PROMPT.format(
@@ -33,14 +35,14 @@ class BlueprintFillingWorkflow(WorkflowBase):
             raw_knowledge=self.raw_knowledge
         )
         self._append_log(f"Filling {len(self.attribute_schema)} attributes")
-        raw = await self.language_engine.async_get_response(
+        raw = await self._language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )
 
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
-            result = await self.execute_subflow(JsonFixWorkflow, self.language_engine, raw)
+            result = await self.execute_subflow(JsonFixWorkflow, raw)
 
         self._append_log(f"Filled {len(result)} attributes")
         return result

@@ -3,7 +3,6 @@ Generate blueprint schema (description + attribute:description pairs) from a que
 """
 import json
 
-from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
 from workflow.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
@@ -61,11 +60,15 @@ Output ONLY valid JSON in the same format."""
 class BlueprintGenerationWorkflow(WorkflowBase):
     MAX_RETRIES = 2
 
-    def __init__(self, language_engine: LanguageEngine, query: str, raw_text: str = None):
+    def __init__(self):
         super().__init__()
-        self.language_engine = language_engine
+        self.query = ""
+        self.raw_text = None
+
+    async def build(self, query: str, raw_text: str = None):
         self.query = query
         self.raw_text = raw_text
+        return self
 
     async def _generate(self) -> dict:
         self._append_log("Start generating blueprint schema")
@@ -73,7 +76,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         if self.raw_text:
             raw_text_section = f"\nReference Text:\n{self.raw_text}\n"
         prompt = GENERATE_PROMPT.format(query=self.query, raw_text_section=raw_text_section)
-        raw = await self.language_engine.async_get_response(
+        raw = await self._language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )
         try:
@@ -82,7 +85,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             return result
         except json.JSONDecodeError:
             self._append_log("Blueprint JSON malformed, invoking JsonFixWorkflow")
-            return await self.execute_subflow(JsonFixWorkflow, self.language_engine, raw)
+            return await self.execute_subflow(JsonFixWorkflow, raw)
 
     async def _validate(self, blueprint: dict) -> str | None:
         """Returns None if valid, issues string if not"""
@@ -91,7 +94,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             query=self.query,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
         )
-        result = await self.language_engine.async_get_response(
+        result = await self._language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )
         if result.strip().startswith("YES"):
@@ -106,7 +109,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             issues=issues,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
         )
-        raw = await self.language_engine.async_get_response(
+        raw = await self._language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )
         try:
@@ -115,7 +118,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             return result
         except json.JSONDecodeError:
             self._append_log("Refined blueprint JSON malformed, invoking JsonFixWorkflow")
-            return await self.execute_subflow(JsonFixWorkflow, self.language_engine, raw)
+            return await self.execute_subflow(JsonFixWorkflow, raw)
 
     async def execute(self) -> Blueprint:
         """

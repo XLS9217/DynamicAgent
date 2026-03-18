@@ -4,7 +4,6 @@ Extract text from files using VLM
 import asyncio
 from PIL import Image
 
-from dynamic_agent_service.agent.vision_engine import VisionEngine
 from dynamic_agent_service.util.file_process import file_to_images
 from workflow.workflow_base import WorkflowBase
 
@@ -20,13 +19,16 @@ Output format:
 
 
 class FileTextificationWorkflow(WorkflowBase):
-    def __init__(self, vision_engine: VisionEngine, file_source: str | bytes, filetype: str):
+    def __init__(self):
         super().__init__()
-        self.vision_engine = vision_engine
+        self.images = []
+
+    async def build(self, file_source: str | bytes, filetype: str):
         self.images = file_to_images(file_source, filetype)
+        return self
 
     async def _extract_page(self, page_num: int) -> tuple[int, str]:
-        text = await self.vision_engine.async_get_response(
+        text = await self._vision_engine.async_get_response(
             [{"role": "system", "content": SYSTEM_PROMPT}],
             [self.images[page_num]]
         )

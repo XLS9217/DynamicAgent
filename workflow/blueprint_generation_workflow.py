@@ -78,7 +78,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            return await JsonFixWorkflow(self.language_engine, raw).execute()
+            return await self.execute_subflow(JsonFixWorkflow, self.language_engine, raw)
 
     async def _validate(self, blueprint: dict) -> str | None:
         """Returns None if valid, issues string if not"""
@@ -104,7 +104,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            return await JsonFixWorkflow(self.language_engine, raw).execute()
+            return await self.execute_subflow(JsonFixWorkflow, self.language_engine, raw)
 
     async def execute(self) -> Blueprint:
         """

@@ -32,7 +32,8 @@ async def main():
     )
 
     # Extract text from file (parallel)
-    raw_knowledge = await FileTextificationWorkflow(vision_engine, PDF_PATH, "pdf").execute()
+    text_wf = FileTextificationWorkflow(vision_engine, PDF_PATH, "pdf")
+    raw_knowledge = await text_wf.execute()
     print(f"Extracted {len(raw_knowledge)} characters")
 
     # Save merged text
@@ -42,7 +43,8 @@ async def main():
 
     # Step 1: Generate blueprint schema
     query = "I want to know the product features, target users, usage scenarios, technical architecture, and competitive advantages about AirLink"
-    blueprint = await BlueprintGenerationWorkflow(llm_engine, query).execute()
+    blueprint_wf = BlueprintGenerationWorkflow(llm_engine, query)
+    blueprint = await blueprint_wf.execute()
     print(f"Blueprint: {blueprint.description}")
     print(f"Generated {len(blueprint.attributes)} attributes")
 
@@ -53,11 +55,12 @@ async def main():
             f.write(f"### {attr_name}\n\n{attr_desc}\n\n")
 
     # Step 2: Fill attribute values
-    attribute_values = await BlueprintFillingWorkflow(
+    filling_wf = BlueprintFillingWorkflow(
         llm_engine,
         blueprint.attributes,
         raw_knowledge
-    ).execute()
+    )
+    attribute_values = await filling_wf.execute()
     print(json.dumps(attribute_values, ensure_ascii=False, indent=2))
 
     # Save final attributes
@@ -65,6 +68,11 @@ async def main():
         f.write(f"# Blueprint: {blueprint.description}\n\n**Query:** {query}\n\n")
         for attr_name, attr_value in attribute_values.items():
             f.write(f"### {attr_name}\n\n{attr_value}\n\n")
+
+    # Save workflow logs as JSONL (one file per workflow)
+    text_wf.save_jsonl(os.path.join(CACHE_DIR, "airlink_textification_workflow.jsonl"))
+    blueprint_wf.save_jsonl(os.path.join(CACHE_DIR, "airlink_blueprint_generation_workflow.jsonl"))
+    filling_wf.save_jsonl(os.path.join(CACHE_DIR, "airlink_blueprint_filling_workflow.jsonl"))
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ class BlueprintFillingWorkflow(WorkflowBase):
         try:
             result = json.loads(raw)
         except json.JSONDecodeError:
-            result = await JsonFixWorkflow(self.language_engine, raw).execute()
+            result = await self.execute_subflow(JsonFixWorkflow, self.language_engine, raw)
 
         self._append_log(f"Filled {len(result)} attributes")
         return result

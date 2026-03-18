@@ -11,6 +11,7 @@ from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.vision_engine import VisionEngine
 from workflow.file_textification_workflow import FileTextificationWorkflow
 from workflow.blueprint_generation_workflow import BlueprintGenerationWorkflow
+from workflow.blueprint_filling_workflow import BlueprintFillingWorkflow
 
 load_dotenv()
 
@@ -52,19 +53,11 @@ async def main():
             f.write(f"### {attr_name}\n\n{attr_desc}\n\n")
 
     # Step 2: Fill attribute values
-    fill_prompt = f"""Given the attribute schema and raw knowledge, extract the actual values for each attribute.
-
-Attribute Schema:
-{json.dumps(blueprint.attributes, ensure_ascii=False, indent=2)}
-
-Raw Knowledge:
-{raw_knowledge}
-
-Output ONLY valid JSON: {{"attribute_name": "actual value from raw knowledge", ...}}
-Values MUST be in the same language as the raw knowledge."""
-
-    fill_result = await llm_engine.async_get_response([{"role": "user", "content": fill_prompt}])
-    attribute_values = json.loads(fill_result)
+    attribute_values = await BlueprintFillingWorkflow(
+        llm_engine,
+        blueprint.attributes,
+        raw_knowledge
+    ).execute()
     print(json.dumps(attribute_values, ensure_ascii=False, indent=2))
 
     # Save final attributes

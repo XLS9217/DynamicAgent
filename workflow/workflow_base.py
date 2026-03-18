@@ -25,8 +25,8 @@ class WorkflowBase(ABC):
         caller = inspect.stack()[1].function
         record = {
             "time": datetime.now().isoformat(),
-            "workflow": self.__class__.__name__,
             "caller_workflow": self._caller_class,
+            "workflow": self.__class__.__name__,
             "function_name": caller,
             "message": message
         }

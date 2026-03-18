@@ -9,14 +9,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.vision_engine import VisionEngine
-from workflow.file_textification_workflow import FileTextificationWorkflow
-from workflow.blueprint_generation_workflow import BlueprintGenerationWorkflow
-from workflow.blueprint_filling_workflow import BlueprintFillingWorkflow
+from workflow.knowledge_inbound_workflow import KnowledgeInboundWorkflow
 
 load_dotenv()
 
 PDF_PATH = os.getenv("TEST_PDF_PATH")
-CACHE_DIR = os.getenv("CACHE_DIR")
+CACHE_DIR = os.getenv("CACHE_DIR") or str(Path(__file__).parent / "cache")
 
 
 async def main():
@@ -31,48 +29,36 @@ async def main():
         model=os.getenv("VLM_NAME")
     )
 
-    # Extract text from file (parallel)
-    text_wf = FileTextificationWorkflow(vision_engine, PDF_PATH, "pdf")
-    raw_knowledge = await text_wf.execute()
-    print(f"Extracted {len(raw_knowledge)} characters")
-
-    # Save merged text
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    with open(os.path.join(CACHE_DIR, "airlink_merged.md"), "w", encoding="utf-8") as f:
-        f.write(raw_knowledge)
-
-    # Step 1: Generate blueprint schema
     query = "I want to know the product features, target users, usage scenarios, technical architecture, and competitive advantages about AirLink"
-    blueprint_wf = BlueprintGenerationWorkflow(llm_engine, query)
-    blueprint = await blueprint_wf.execute()
-    print(f"Blueprint: {blueprint.description}")
-    print(f"Generated {len(blueprint.attributes)} attributes")
+    inbound_wf = KnowledgeInboundWorkflow(
+        llm_engine,
+        vision_engine,
+        PDF_PATH,
+        "pdf",
+        query
+    )
+    await inbound_wf.execute()
 
-    # Save schema
-    with open(os.path.join(CACHE_DIR, "airlink_attribute_schema.md"), "w", encoding="utf-8") as f:
-        f.write(f"# Blueprint: {blueprint.description}\n\n**Query:** {query}\n\n")
-        for attr_name, attr_desc in blueprint.attributes.items():
+    os.makedirs(CACHE_DIR, exist_ok=True)
+
+    with open(os.path.join(CACHE_DIR, "merged.md"), "w", encoding="utf-8") as f:
+        f.write(inbound_wf._raw_knowledge_text)
+
+    with open(os.path.join(CACHE_DIR, "schema.md"), "w", encoding="utf-8") as f:
+        f.write(f"# Blueprint: {inbound_wf._blueprint_schema.description}\n\n**Query:** {query}\n\n")
+        for attr_name, attr_desc in inbound_wf._blueprint_schema.attributes.items():
             f.write(f"### {attr_name}\n\n{attr_desc}\n\n")
 
-    # Step 2: Fill attribute values
-    filling_wf = BlueprintFillingWorkflow(
-        llm_engine,
-        blueprint.attributes,
-        raw_knowledge
-    )
-    attribute_values = await filling_wf.execute()
-    print(json.dumps(attribute_values, ensure_ascii=False, indent=2))
-
-    # Save final attributes
-    with open(os.path.join(CACHE_DIR, "airlink_attributes.md"), "w", encoding="utf-8") as f:
-        f.write(f"# Blueprint: {blueprint.description}\n\n**Query:** {query}\n\n")
-        for attr_name, attr_value in attribute_values.items():
+    with open(os.path.join(CACHE_DIR, "filled.md"), "w", encoding="utf-8") as f:
+        f.write(f"# Blueprint: {inbound_wf._blueprint_schema.description}\n\n**Query:** {query}\n\n")
+        for attr_name, attr_value in inbound_wf._filled_blueprint.items():
             f.write(f"### {attr_name}\n\n{attr_value}\n\n")
 
-    # Save workflow logs as JSONL (one file per workflow)
-    text_wf.save_jsonl(os.path.join(CACHE_DIR, "airlink_textification_workflow.jsonl"))
-    blueprint_wf.save_jsonl(os.path.join(CACHE_DIR, "airlink_blueprint_generation_workflow.jsonl"))
-    filling_wf.save_jsonl(os.path.join(CACHE_DIR, "airlink_blueprint_filling_workflow.jsonl"))
+    inbound_wf.save_jsonl(os.path.join(CACHE_DIR, "knowledge_inbound_log.jsonl"))
+
+    print(f"Blueprint: {inbound_wf._blueprint_schema.description}")
+    print(f"Generated {len(inbound_wf._blueprint_schema.attributes)} attributes")
+    print(json.dumps(inbound_wf._filled_blueprint, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
+from tests.fake_knowledge_accessor import FakeKnowledgeAccessor
 from workflow.knowledge_inbound_workflow import KnowledgeInboundWorkflow
 from workflow.workflow_base import build_workflow
 
@@ -23,8 +24,10 @@ query_list = [
     "Please summarize this product.",
 ]
 
+query = "记录这个产品，包括它的名字，产品功能、目标用户、使用场景、技术架构，以及相对竞品的核心优势。"
 
-async def run_single_test(index: int, query: str):
+
+async def run_single_test(index: int, query: str, knowledge_accessor=None):
     test_cache_dir = os.path.join(CACHE_DIR, f"test_{index}")
     os.makedirs(test_cache_dir, exist_ok=True)
 
@@ -33,6 +36,7 @@ async def run_single_test(index: int, query: str):
         PDF_PATH,
         "pdf",
         query,
+        knowledge_accessor=knowledge_accessor,
         workflow_bucket=os.path.join(test_cache_dir, "KnowledgeInboundWorkflow.jsonl")
     )
     await inbound_wf.execute()
@@ -57,7 +61,13 @@ async def run_single_test(index: int, query: str):
 
 async def main():
     os.makedirs(CACHE_DIR, exist_ok=True)
-    await asyncio.gather(*(run_single_test(index, query) for index, query in enumerate(query_list)))
+    accessor = FakeKnowledgeAccessor(CACHE_DIR)
+
+    # Single query test
+    await run_single_test(0, query, knowledge_accessor=accessor)
+
+    # Batch test (comment/uncomment to switch)
+    # await asyncio.gather(*(run_single_test(i, q, knowledge_accessor=accessor) for i, q in enumerate(query_list)))
 
 
 if __name__ == "__main__":

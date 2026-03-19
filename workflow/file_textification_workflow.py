@@ -28,7 +28,7 @@ class FileTextificationWorkflow(WorkflowBase):
         return self
 
     async def _extract_page(self, page_num: int) -> tuple[int, str]:
-        text = await self._vision_engine.async_get_response(
+        text = await self.invoke_agent(
             [{"role": "system", "content": SYSTEM_PROMPT}],
             [self.images[page_num]]
         )

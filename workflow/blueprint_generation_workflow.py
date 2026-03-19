@@ -76,9 +76,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         if self.raw_text:
             raw_text_section = f"\nReference Text:\n{self.raw_text}\n"
         prompt = GENERATE_PROMPT.format(query=self.query, raw_text_section=raw_text_section)
-        raw = await self._language_engine.async_get_response(
-            [{"role": "user", "content": prompt}]
-        )
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
         try:
             result = json.loads(raw)
             self.append_log(f"Blueprint generated with {len(result.get('attributes', {}))} attributes")
@@ -94,9 +92,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             query=self.query,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
         )
-        result = await self._language_engine.async_get_response(
-            [{"role": "user", "content": prompt}]
-        )
+        result = await self.invoke_agent([{"role": "user", "content": prompt}])
         if result.strip().startswith("YES"):
             self.append_log("Blueprint validation passed")
             return None
@@ -109,9 +105,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             issues=issues,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
         )
-        raw = await self._language_engine.async_get_response(
-            [{"role": "user", "content": prompt}]
-        )
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
         try:
             result = json.loads(raw)
             self.append_log(f"Blueprint refined to {len(result.get('attributes', {}))} attributes")

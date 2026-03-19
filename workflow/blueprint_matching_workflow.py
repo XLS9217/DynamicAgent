@@ -56,9 +56,7 @@ class BlueprintMatchingWorkflow(WorkflowBase):
             for bp in blueprints
         )
         prompt = MATCH_PROMPT.format(query=self.query, blueprints=bp_descriptions)
-        raw = await self._language_engine.async_get_response(
-            [{"role": "user", "content": prompt}]
-        )
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
         answer = raw.strip()
         self.append_log(f"LLM match result: {answer}")
 
@@ -83,9 +81,7 @@ class BlueprintMatchingWorkflow(WorkflowBase):
             blueprint_description=blueprint.description,
             attributes=attrs_text
         )
-        raw = await self._language_engine.async_get_response(
-            [{"role": "user", "content": prompt}]
-        )
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
         answer = raw.strip()
         if answer == "YES":
             self.append_log("Blueprint attributes are sufficient")

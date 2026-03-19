@@ -35,9 +35,7 @@ class BlueprintFillingWorkflow(WorkflowBase):
             raw_knowledge=self.raw_knowledge
         )
         self.append_log(f"Filling {len(self.attribute_schema)} attributes")
-        raw = await self._language_engine.async_get_response(
-            [{"role": "user", "content": prompt}]
-        )
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
 
         try:
             result = json.loads(raw)

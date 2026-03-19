@@ -68,30 +68,78 @@ class WorkflowBase(ABC):
         await subflow.build(*args, **kwargs)
         return await subflow.execute()
 
-    def append_log(self, message: str):
-        caller = inspect.stack()[1].function
+    def _resolve_bucket(self) -> Path:
+        if self._workflow_bucket is not None:
+            return self._workflow_bucket
+        load_dotenv()
+        cache_dir = os.getenv("CACHE_DIR")
+        log_name = f"{self.__class__.__name__}.jsonl"
+        if cache_dir:
+            path = Path(cache_dir) / log_name
+        else:
+            path = Path.cwd() / log_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.touch()
+        self._workflow_bucket = path
+        return path
+
+    def _build_log(self, category: str, caller: str, **extra) -> dict:
         record = {
             "time": datetime.now().isoformat(),
+            "category": category,
             "workflow": self.__class__.__name__,
             "caller_workflow": self._caller_class,
             "function_name": caller,
-            "message": message
+            **extra
         }
-        path = self._workflow_bucket
-        if path is None:
-            load_dotenv()
-            cache_dir = os.getenv("CACHE_DIR")
-            log_name = f"{self.__class__.__name__}.jsonl"
-            if cache_dir:
-                path = Path(cache_dir) / log_name
-            else:
-                path = Path.cwd() / log_name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists():
-                path.touch()
-            self._workflow_bucket = path
+        return record
+
+    def _write_log(self, record: dict):
+        path = self._resolve_bucket()
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def append_log(self, message: str):
+        caller = inspect.stack()[1].function
+        record = self._build_log("SYSTEM", caller, message=message)
+        self._write_log(record)
+
+    @staticmethod
+    def _strip_images(messages: list) -> list:
+        stripped = []
+        for msg in messages:
+            if isinstance(msg.get("content"), list):
+                text_parts = [p for p in msg["content"] if p.get("type") != "image_url"]
+                stripped.append({**msg, "content": text_parts})
+            else:
+                stripped.append(msg)
+        return stripped
+
+    @staticmethod
+    def _has_images(messages: list) -> bool:
+        for msg in messages:
+            if isinstance(msg.get("content"), list):
+                if any(p.get("type") == "image_url" for p in msg["content"]):
+                    return True
+        return False
+
+    async def invoke_agent(self, messages: list, images: list = None) -> str:
+        caller = inspect.stack()[1].function
+        use_vision = images or self._has_images(messages)
+
+        log_messages = self._strip_images(messages)
+        record = self._build_log("AGENT", caller, messages=log_messages)
+        self._write_log(record)
+
+        if use_vision:
+            response = await self._vision_engine.async_get_response(messages, images or [])
+        else:
+            response = await self._language_engine.async_get_response(messages)
+
+        response_record = self._build_log("AGENT", caller, message=response)
+        self._write_log(response_record)
+        return response
 
     def get_log(self) -> list[dict]:
         if self._workflow_bucket is None or not self._workflow_bucket.exists():

@@ -13,6 +13,7 @@ from dynamic_agent_service.agent.vision_engine import VisionEngine
 async def build_workflow(
     workflow_cls,
     *args,
+    workflow_bucket: str | Path | None = None,
     **kwargs
 ):
     load_dotenv()
@@ -26,11 +27,15 @@ async def build_workflow(
         base_url=os.getenv("VLM_BASE_URL"),
         model=os.getenv("VLM_NAME")
     )
-    cache_dir = os.getenv("CACHE_DIR")
-    if cache_dir:
-        workflow_bucket = Path(cache_dir) / "knowledge_inbound_log.jsonl"
+    if workflow_bucket is None:
+        cache_dir = os.getenv("CACHE_DIR")
+        log_name = f"{workflow_cls.__name__}.jsonl"
+        if cache_dir:
+            workflow_bucket = Path(cache_dir) / log_name
+        else:
+            workflow_bucket = Path.cwd() / log_name
     else:
-        workflow_bucket = Path.cwd() / "knowledge_inbound_log.jsonl"
+        workflow_bucket = Path(workflow_bucket)
     workflow_bucket.parent.mkdir(parents=True, exist_ok=True)
     with open(workflow_bucket, "w", encoding="utf-8") as f:
         f.write("")
@@ -76,10 +81,11 @@ class WorkflowBase(ABC):
         if path is None:
             load_dotenv()
             cache_dir = os.getenv("CACHE_DIR")
+            log_name = f"{self.__class__.__name__}.jsonl"
             if cache_dir:
-                path = Path(cache_dir) / "knowledge_inbound_log.jsonl"
+                path = Path(cache_dir) / log_name
             else:
-                path = Path.cwd() / "knowledge_inbound_log.jsonl"
+                path = Path.cwd() / log_name
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists():
                 path.touch()

@@ -20,7 +20,8 @@ Output ONLY valid JSON: {{"attribute_name": "relevant original text chunk from s
 Rules:
 - Each value must be text copied directly from the source, not rewritten
 - Keep the original language of the source text
-- Include enough context for each chunk to be independently understandable"""
+- Include enough context for each chunk to be independently understandable
+- If the source text has no relevant content for an attribute, set its value to null"""
 
 
 class BlueprintFillingWorkflow(WorkflowBase):
@@ -47,5 +48,6 @@ class BlueprintFillingWorkflow(WorkflowBase):
         except json.JSONDecodeError:
             result = await self.execute_subflow(JsonFixWorkflow, raw)
 
+        result = {k: v for k, v in result.items() if v is not None}
         self.append_log(f"Filled {len(result)} attributes")
         return result

@@ -9,3 +9,8 @@ class KnowledgeAccessor:
     def create_blueprint(self, blueprint: Blueprint):
         pass
 
+    def get_blueprint(self, blueprint_id: str):
+        pass
+
+    def get_blueprint_list(self):
+        pass

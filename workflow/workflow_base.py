@@ -68,7 +68,7 @@ class WorkflowBase(ABC):
         await subflow.build(*args, **kwargs)
         return await subflow.execute()
 
-    def _append_log(self, message: str):
+    def append_log(self, message: str):
         caller = inspect.stack()[1].function
         record = {
             "time": datetime.now().isoformat(),

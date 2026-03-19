@@ -16,43 +16,11 @@ class LanguageEngine:
             base_url: Base URL for the LLM API
             model: Model name to use (default: qwen3-max)
         """
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=base_url,
-        )
         self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
         )
         self.model = model
-
-    def stream_response(
-            self,
-            messages: list,
-            tools: list = None,
-            parallel_tool_calls: bool = False
-    ):
-        """
-        Generate a streaming response from the LLM
-
-        :param messages: List of message dicts in OpenAI format (including system message)
-        :param tools: Optional list of tools in OpenAI function calling format
-        :param parallel_tool_calls: Whether to allow parallel tool calls (default: False)
-        :yields: Chunks of the response as they arrive
-        """
-        kwargs = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "parallel_tool_calls": parallel_tool_calls
-        }
-        if tools:
-            kwargs["tools"] = tools
-
-        completion = self.client.chat.completions.create(**kwargs)
-
-        for chunk in completion:
-            yield chunk
 
     async def async_stream_response(
             self,

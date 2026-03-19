@@ -24,13 +24,13 @@ class KnowledgeInboundWorkflow(WorkflowBase):
         return self
 
     async def execute(self) -> dict:
-        self._append_log("Knowledge inbound started")
+        self.append_log("Knowledge inbound started")
         self._raw_knowledge_text = await self.execute_subflow(
             FileTextificationWorkflow,
             self.file_source,
             self.filetype
         )
-        self._append_log(f"Extracted {len(self._raw_knowledge_text)} characters")
+        self.append_log(f"Extracted {len(self._raw_knowledge_text)} characters")
 
         if self.knowledge_accessor:
             self._blueprint_schema = await self.execute_subflow(
@@ -40,24 +40,24 @@ class KnowledgeInboundWorkflow(WorkflowBase):
             )
 
         if self._blueprint_schema is None:
-            self._append_log("No matching blueprint found, generating new one")
+            self.append_log("No matching blueprint found, generating new one")
             self._blueprint_schema = await self.execute_subflow(
                 BlueprintGenerationWorkflow,
                 self.inbound_query
             )
             if self.knowledge_accessor:
                 self.knowledge_accessor.create_blueprint(self._blueprint_schema)
-                self._append_log(f"Saved new blueprint: {self._blueprint_schema.name}")
+                self.append_log(f"Saved new blueprint: {self._blueprint_schema.name}")
 
-        self._append_log(f"Using blueprint: {self._blueprint_schema.name} with {len(self._blueprint_schema.attributes)} attributes")
+        self.append_log(f"Using blueprint: {self._blueprint_schema.name} with {len(self._blueprint_schema.attributes)} attributes")
 
         self._filled_blueprint = await self.execute_subflow(
             BlueprintFillingWorkflow,
             self._blueprint_schema.attributes,
             self._raw_knowledge_text
         )
-        self._append_log(f"Filled {len(self._filled_blueprint)} blueprint attributes")
-        self._append_log("Knowledge inbound completed")
+        self.append_log(f"Filled {len(self._filled_blueprint)} blueprint attributes")
+        self.append_log("Knowledge inbound completed")
 
         return {
             "query": self.inbound_query,

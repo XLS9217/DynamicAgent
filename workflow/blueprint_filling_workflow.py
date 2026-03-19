@@ -34,7 +34,7 @@ class BlueprintFillingWorkflow(WorkflowBase):
             attribute_schema=json.dumps(self.attribute_schema, ensure_ascii=False, indent=2),
             raw_knowledge=self.raw_knowledge
         )
-        self._append_log(f"Filling {len(self.attribute_schema)} attributes")
+        self.append_log(f"Filling {len(self.attribute_schema)} attributes")
         raw = await self._language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )
@@ -44,5 +44,5 @@ class BlueprintFillingWorkflow(WorkflowBase):
         except json.JSONDecodeError:
             result = await self.execute_subflow(JsonFixWorkflow, raw)
 
-        self._append_log(f"Filled {len(result)} attributes")
+        self.append_log(f"Filled {len(result)} attributes")
         return result

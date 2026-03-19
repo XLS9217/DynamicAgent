@@ -32,14 +32,14 @@ class FileTextificationWorkflow(WorkflowBase):
             [{"role": "system", "content": SYSTEM_PROMPT}],
             [self.images[page_num]]
         )
-        self._append_log(f"Page {page_num + 1} extracted")
+        self.append_log(f"Page {page_num + 1} extracted")
         return (page_num, text)
 
     async def execute(self) -> str:
-        self._append_log(f"Extracting {len(self.images)} pages")
+        self.append_log(f"Extracting {len(self.images)} pages")
         tasks = [self._extract_page(i) for i in range(len(self.images))]
         results = await asyncio.gather(*tasks)
         results.sort(key=lambda x: x[0])
         merged = "\n\n".join([f"# Page {num + 1}\n{text}" for num, text in results])
-        self._append_log(f"Extracted {len(merged)} characters")
+        self.append_log(f"Extracted {len(merged)} characters")
         return merged

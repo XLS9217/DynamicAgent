@@ -21,10 +21,10 @@ class JsonFixWorkflow(WorkflowBase):
         return self
 
     async def execute(self) -> dict:
-        self._append_log(f"Fixing JSON ({len(self.raw)} chars)")
+        self.append_log(f"Fixing JSON ({len(self.raw)} chars)")
         prompt = SYSTEM_PROMPT.format(raw=self.raw)
         result = await self._language_engine.async_get_response(
             [{"role": "user", "content": prompt}]
         )
-        self._append_log("JSON fixed")
+        self.append_log("JSON fixed")
         return json.loads(result)

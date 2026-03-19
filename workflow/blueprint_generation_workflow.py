@@ -71,7 +71,7 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         return self
 
     async def _generate(self) -> dict:
-        self._append_log("Start generating blueprint schema")
+        self.append_log("Start generating blueprint schema")
         raw_text_section = ""
         if self.raw_text:
             raw_text_section = f"\nReference Text:\n{self.raw_text}\n"
@@ -81,15 +81,15 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         )
         try:
             result = json.loads(raw)
-            self._append_log(f"Blueprint generated with {len(result.get('attributes', {}))} attributes")
+            self.append_log(f"Blueprint generated with {len(result.get('attributes', {}))} attributes")
             return result
         except json.JSONDecodeError:
-            self._append_log("Blueprint JSON malformed, invoking JsonFixWorkflow")
+            self.append_log("Blueprint JSON malformed, invoking JsonFixWorkflow")
             return await self.execute_subflow(JsonFixWorkflow, raw)
 
     async def _validate(self, blueprint: dict) -> str | None:
         """Returns None if valid, issues string if not"""
-        self._append_log("Validating blueprint quality")
+        self.append_log("Validating blueprint quality")
         prompt = VALIDATE_PROMPT.format(
             query=self.query,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
@@ -98,13 +98,13 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             [{"role": "user", "content": prompt}]
         )
         if result.strip().startswith("YES"):
-            self._append_log("Blueprint validation passed")
+            self.append_log("Blueprint validation passed")
             return None
-        self._append_log("Blueprint validation failed, refinement required")
+        self.append_log("Blueprint validation failed, refinement required")
         return result
 
     async def _refine(self, blueprint: dict, issues: str) -> dict:
-        self._append_log("Refining blueprint")
+        self.append_log("Refining blueprint")
         prompt = REFINE_PROMPT.format(
             issues=issues,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
@@ -114,17 +114,17 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         )
         try:
             result = json.loads(raw)
-            self._append_log(f"Blueprint refined to {len(result.get('attributes', {}))} attributes")
+            self.append_log(f"Blueprint refined to {len(result.get('attributes', {}))} attributes")
             return result
         except json.JSONDecodeError:
-            self._append_log("Refined blueprint JSON malformed, invoking JsonFixWorkflow")
+            self.append_log("Refined blueprint JSON malformed, invoking JsonFixWorkflow")
             return await self.execute_subflow(JsonFixWorkflow, raw)
 
     async def execute(self) -> Blueprint:
         """
         Orchestrator: generate -> validate -> refine (max 2 retries)
         """
-        self._append_log("BlueprintGenerationWorkflow started")
+        self.append_log("BlueprintGenerationWorkflow started")
         blueprint = await self._generate()
 
         for _ in range(self.MAX_RETRIES):
@@ -133,5 +133,5 @@ class BlueprintGenerationWorkflow(WorkflowBase):
                 break
             blueprint = await self._refine(blueprint, issues)
 
-        self._append_log("BlueprintGenerationWorkflow completed")
+        self.append_log("BlueprintGenerationWorkflow completed")
         return Blueprint(**blueprint)

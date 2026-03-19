@@ -43,15 +43,16 @@ Writes one log record per line (JSONL).
 ```python
 from workflow.workflow_base import WorkflowBase
 
+
 class MyWorkflow(WorkflowBase):
     def __init__(self, arg1: str):
         super().__init__()
         self.arg1 = arg1
 
     async def execute(self):
-        self._append_log("start")
+        self.append_log("start")
         # do work
-        self._append_log("done")
+        self.append_log("done")
         return {"ok": True}
 ```
 

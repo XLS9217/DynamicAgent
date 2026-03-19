@@ -1,21 +1,26 @@
 """
-Fill blueprint attributes with actual values from raw knowledge
+Fill blueprint attributes by chunking relevant original text from raw knowledge
 """
 import json
 
 from workflow.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
-FILL_PROMPT = """Given the attribute schema and raw knowledge, extract the actual values for each attribute.
+FILL_PROMPT = """You are a RAG chunking agent.
+Your task is to extract relevant chunks of original text from the source for each attribute.
+Preserve as much original text as possible — do not summarize or paraphrase.
 
-Attribute Schema:
-{attribute_schema}
-
-Raw Knowledge:
+Source Text:
 {raw_knowledge}
 
-Output ONLY valid JSON: {{"attribute_name": "actual value from raw knowledge", ...}}
-Values MUST be in the same language as the raw knowledge."""
+Attributes to fill:
+{attribute_schema}
+
+Output ONLY valid JSON: {{"attribute_name": "relevant original text chunk from source", ...}}
+Rules:
+- Each value must be text copied directly from the source, not rewritten
+- Keep the original language of the source text
+- Include enough context for each chunk to be independently understandable"""
 
 
 class BlueprintFillingWorkflow(WorkflowBase):

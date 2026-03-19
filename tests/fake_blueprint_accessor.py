@@ -6,7 +6,7 @@ from pathlib import Path
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
 
 
-class FakeKnowledgeAccessor:
+class FakeBlueprintAccessor:
 
     def __init__(self, cache_dir: str):
         self._db_path = Path(cache_dir) / "fake_db.json"
@@ -34,6 +34,8 @@ class FakeKnowledgeAccessor:
 
     def get_blueprint_list(self) -> list[Blueprint]:
         return [Blueprint(**v) for v in self._data.values()]
+
+
 
 
 SEED_PROMPT = """Generate 6 diverse blueprint schemas for a knowledge management system.
@@ -65,7 +67,7 @@ async def main():
     raw = await engine.async_get_response([{"role": "user", "content": SEED_PROMPT}])
     blueprints = json.loads(raw)
 
-    accessor = FakeKnowledgeAccessor(cache_dir)
+    accessor = FakeBlueprintAccessor(cache_dir)
     for bp_data in blueprints:
         bp = Blueprint(**bp_data)
         bp_id = accessor.create_blueprint(bp)

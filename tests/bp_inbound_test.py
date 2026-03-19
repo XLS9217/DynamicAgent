@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
-from tests.fake_knowledge_accessor import FakeKnowledgeAccessor
+from tests.fake_blueprint_accessor import FakeBlueprintAccessor
 from workflow.knowledge_inbound_workflow import KnowledgeInboundWorkflow
 from workflow.workflow_base import build_workflow
 
@@ -61,7 +61,7 @@ async def run_single_test(index: int, query: str, knowledge_accessor=None):
 
 async def main():
     os.makedirs(CACHE_DIR, exist_ok=True)
-    accessor = FakeKnowledgeAccessor(CACHE_DIR)
+    accessor = FakeBlueprintAccessor(CACHE_DIR)
 
     # Single query test
     await run_single_test(0, query, knowledge_accessor=accessor)

@@ -1,7 +1,7 @@
 from knowledge.knowledge_structs import Blueprint
 
 
-class KnowledgeAccessor:
+class BlueprintAccessor:
 
     def __init__(self):
         pass

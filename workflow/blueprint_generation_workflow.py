@@ -25,7 +25,7 @@ Rules:
 - Description must be general and reusable, not specific to any particular instance
 - Attribute names must be in English, lowercase, using underscores
 - Keep descriptions concise
-- Set is_identifier to true for attributes that uniquely identify an instance (e.g. name, title, ID)"""
+- Set is_identifier to true for the single attribute that uniquely identifies an instance (e.g. name, title, ID). Exactly one attribute must be the identifier."""
 
 VALIDATE_PROMPT = """Review this blueprint schema for quality:
 
@@ -39,7 +39,7 @@ Check:
 2. Are attribute names in English, lowercase, with underscores?
 3. Are attributes relevant and sufficient for the query?
 4. Are attribute descriptions clear and concise?
-5. Is is_identifier correctly set (true only for attributes that uniquely identify an instance)?
+5. Is there exactly one attribute with is_identifier set to true?
 
 If ALL checks pass, respond with ONLY: YES
 If ANY check fails, respond with ONLY: NO

@@ -7,8 +7,7 @@ from workflow.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 FILL_PROMPT = """You are a RAG chunking agent.
-Your task is to extract relevant chunks of original text from the source for each attribute.
-Preserve as much original text as possible — do not summarize or paraphrase.
+Your task is to extract relevant content from the source for each attribute, and organize it into readable markdown.
 
 Source Text:
 {raw_knowledge}
@@ -16,11 +15,13 @@ Source Text:
 Attributes to fill:
 {attribute_schema}
 
-Output ONLY valid JSON: {{"attribute_name": "relevant original text chunk from source", ...}}
+Output ONLY valid JSON: {{"attribute_name": "markdown formatted content", ...}}
 Rules:
-- Each value must be text copied directly from the source, not rewritten
+- Use the original text as much as possible — do not invent information
+- You may reorder, deduplicate, and add markdown formatting (headings, bullet points, bold) to improve readability
+- You may add brief transitional phrases to connect scattered pieces, but the substance must come from the source
 - Keep the original language of the source text
-- Include enough context for each chunk to be independently understandable
+- Each value should be independently understandable
 - If the source text has no relevant content for an attribute, set its value to null"""
 
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class BlueprintAttributeSchema(BaseModel):
@@ -10,6 +10,13 @@ class Blueprint(BaseModel):
     name: str
     description: str
     attributes: dict[str, BlueprintAttributeSchema]
+
+    @model_validator(mode="after")
+    def exactly_one_identifier(self):
+        count = sum(1 for a in self.attributes.values() if a.is_identifier)
+        if count != 1:
+            raise ValueError(f"Blueprint must have exactly 1 identifier attribute, got {count}")
+        return self
 
 
 class BlueprintAttribute(BaseModel):

@@ -36,7 +36,7 @@ Rules:
 - Only suggest attributes that are genuinely missing
 - Attribute names must be in English, lowercase, using underscores
 - Keep descriptions concise
-- Set is_identifier to true only for attributes that uniquely identify an instance"""
+- Set is_identifier to false for all new attributes (the blueprint already has one identifier)"""
 
 
 class BlueprintMatchingWorkflow(WorkflowBase):

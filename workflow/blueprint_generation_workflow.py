@@ -16,7 +16,7 @@ Output ONLY valid JSON in this format:
   "name": "short_snake_case_name for this blueprint type",
   "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
   "attributes": {{
-    "attribute_name": "description of what this attribute represents",
+    "attribute_name": {{"description": "description of what this attribute represents", "is_identifier": false}},
     ...
   }}
 }}
@@ -24,7 +24,8 @@ Output ONLY valid JSON in this format:
 Rules:
 - Description must be general and reusable, not specific to any particular instance
 - Attribute names must be in English, lowercase, using underscores
-- Keep descriptions concise"""
+- Keep descriptions concise
+- Set is_identifier to true for attributes that uniquely identify an instance (e.g. name, title, ID)"""
 
 VALIDATE_PROMPT = """Review this blueprint schema for quality:
 
@@ -38,6 +39,7 @@ Check:
 2. Are attribute names in English, lowercase, with underscores?
 3. Are attributes relevant and sufficient for the query?
 4. Are attribute descriptions clear and concise?
+5. Is is_identifier correctly set (true only for attributes that uniquely identify an instance)?
 
 If ALL checks pass, respond with ONLY: YES
 If ANY check fails, respond with ONLY: NO

@@ -11,7 +11,7 @@ import uuid
 from dynamic_agent_service.data.data_accessor import DataAccessor
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.knowledge.knowledge_structs import (
-    Blueprint, BlueprintAttribute, BlueprintInstance,
+    Blueprint, BlueprintAttribute, BlueprintAttributeSchema, BlueprintInstance,
 )
 
 
@@ -31,7 +31,8 @@ class BlueprintAccessor(DataAccessor):
                     id           TEXT PRIMARY KEY,
                     blueprint_id TEXT NOT NULL REFERENCES blueprint(id),
                     name         TEXT NOT NULL,
-                    description  TEXT NOT NULL
+                    description  TEXT NOT NULL,
+                    is_identifier BOOLEAN NOT NULL DEFAULT FALSE
                 );
                 CREATE TABLE IF NOT EXISTS blueprint_instance (
                     id           TEXT PRIMARY KEY,
@@ -50,11 +51,11 @@ class BlueprintAccessor(DataAccessor):
                 "INSERT INTO blueprint (id, name, description) VALUES ($1, $2, $3)",
                 bp_id, blueprint.name, blueprint.description,
             )
-            for attr_name, attr_desc in blueprint.attributes.items():
+            for attr_name, attr_schema in blueprint.attributes.items():
                 attr_id = str(uuid.uuid4())
                 await conn.execute(
-                    "INSERT INTO blueprint_attribute (id, blueprint_id, name, description) VALUES ($1, $2, $3, $4)",
-                    attr_id, bp_id, attr_name, attr_desc,
+                    "INSERT INTO blueprint_attribute (id, blueprint_id, name, description, is_identifier) VALUES ($1, $2, $3, $4, $5)",
+                    attr_id, bp_id, attr_name, attr_schema.description, attr_schema.is_identifier,
                 )
         return bp_id
 
@@ -65,11 +66,11 @@ class BlueprintAccessor(DataAccessor):
             row = await conn.fetchrow("SELECT name, description FROM blueprint WHERE id = $1", blueprint_id)
             if row is None:
                 return None
-            attrs = await conn.fetch("SELECT name, description FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
+            attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
             return Blueprint(
                 name=row["name"],
                 description=row["description"],
-                attributes={a["name"]: a["description"] for a in attrs},
+                attributes={a["name"]: BlueprintAttributeSchema(description=a["description"], is_identifier=a["is_identifier"]) for a in attrs},
             )
 
     @staticmethod
@@ -79,11 +80,11 @@ class BlueprintAccessor(DataAccessor):
             rows = await conn.fetch("SELECT id, name, description FROM blueprint")
             results = []
             for row in rows:
-                attrs = await conn.fetch("SELECT name, description FROM blueprint_attribute WHERE blueprint_id = $1", row["id"])
+                attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", row["id"])
                 results.append(Blueprint(
                     name=row["name"],
                     description=row["description"],
-                    attributes={a["name"]: a["description"] for a in attrs},
+                    attributes={a["name"]: BlueprintAttributeSchema(description=a["description"], is_identifier=a["is_identifier"]) for a in attrs},
                 ))
             return results
 
@@ -91,7 +92,7 @@ class BlueprintAccessor(DataAccessor):
     async def get_attributes(blueprint_id: str) -> list[BlueprintAttribute]:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, blueprint_id, name, description FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
+            rows = await conn.fetch("SELECT id, blueprint_id, name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
             return [BlueprintAttribute(**dict(r)) for r in rows]
 
     @staticmethod

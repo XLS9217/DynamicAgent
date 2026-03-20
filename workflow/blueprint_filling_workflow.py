@@ -25,6 +25,7 @@ Rules:
 
 
 class BlueprintFillingWorkflow(WorkflowBase):
+    # TODO: use is_identifier from BlueprintAttributeSchema to prioritize identifier attributes during filling
     def __init__(self):
         super().__init__()
         self.attribute_schema = {}

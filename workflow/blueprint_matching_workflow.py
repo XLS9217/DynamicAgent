@@ -5,7 +5,7 @@ If no match, return None so the caller can generate a new one.
 """
 import json
 
-from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
+from dynamic_agent_service.knowledge.knowledge_structs import Blueprint, BlueprintAttributeSchema
 from workflow.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
@@ -30,12 +30,13 @@ Current Attributes:
 
 If the current attributes are sufficient, respond with ONLY: YES
 If additional attributes are needed, respond with ONLY the missing attributes as valid JSON:
-{{"new_attr_name": "description of what this attribute represents", ...}}
+{{"new_attr_name": {{"description": "description of what this attribute represents", "is_identifier": false}}, ...}}
 
 Rules:
 - Only suggest attributes that are genuinely missing
 - Attribute names must be in English, lowercase, using underscores
-- Keep descriptions concise"""
+- Keep descriptions concise
+- Set is_identifier to true only for attributes that uniquely identify an instance"""
 
 
 class BlueprintMatchingWorkflow(WorkflowBase):
@@ -71,10 +72,10 @@ class BlueprintMatchingWorkflow(WorkflowBase):
         self.append_log(f"LLM returned '{answer}' but no blueprint matched by name")
         return None
 
-    async def _check(self, blueprint: Blueprint) -> dict[str, str] | None:
+    async def _check(self, blueprint: Blueprint) -> dict[str, BlueprintAttributeSchema] | None:
         """Returns new attributes dict if upgrade needed, None if sufficient."""
         self.append_log(f"Checking if blueprint '{blueprint.name}' has enough attributes")
-        attrs_text = "\n".join(f"- {k}: {v}" for k, v in blueprint.attributes.items())
+        attrs_text = "\n".join(f"- {k}: {v.description} (identifier: {v.is_identifier})" for k, v in blueprint.attributes.items())
         prompt = CHECK_PROMPT.format(
             query=self.query,
             blueprint_name=blueprint.name,
@@ -89,11 +90,12 @@ class BlueprintMatchingWorkflow(WorkflowBase):
 
         self.append_log("Blueprint needs additional attributes")
         try:
-            return json.loads(answer)
+            raw_dict = json.loads(answer)
         except json.JSONDecodeError:
-            return await self.execute_subflow(JsonFixWorkflow, answer)
+            raw_dict = await self.execute_subflow(JsonFixWorkflow, answer)
+        return {k: BlueprintAttributeSchema(**v) for k, v in raw_dict.items()}
 
-    async def _upgrade(self, blueprint: Blueprint, new_attributes: dict[str, str]) -> Blueprint:
+    async def _upgrade(self, blueprint: Blueprint, new_attributes: dict[str, BlueprintAttributeSchema]) -> Blueprint:
         self.append_log(f"Upgrading blueprint '{blueprint.name}' with {len(new_attributes)} new attributes")
         merged = {**blueprint.attributes, **new_attributes}
         upgraded = Blueprint(name=blueprint.name, description=blueprint.description, attributes=merged)
@@ -102,7 +104,7 @@ class BlueprintMatchingWorkflow(WorkflowBase):
 
     async def execute(self) -> Blueprint | None:
         self.append_log("BlueprintMatchingWorkflow started")
-        blueprints = self.knowledge_accessor.get_blueprint_list()
+        blueprints = await self.knowledge_accessor.get_blueprint_list()
         if not blueprints:
             self.append_log("No existing blueprints, returning None")
             return None

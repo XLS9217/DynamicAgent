@@ -1,10 +1,15 @@
 from pydantic import BaseModel
 
 
+class BlueprintAttributeSchema(BaseModel):
+    description: str
+    is_identifier: bool = False
+
+
 class Blueprint(BaseModel):
     name: str
     description: str
-    attributes: dict[str, str]  # attribute_name -> attribute_description
+    attributes: dict[str, BlueprintAttributeSchema]
 
 
 class BlueprintAttribute(BaseModel):
@@ -12,6 +17,7 @@ class BlueprintAttribute(BaseModel):
     blueprint_id: str
     name: str
     description: str
+    is_identifier: bool = False
 
 
 class BlueprintInstance(BaseModel):

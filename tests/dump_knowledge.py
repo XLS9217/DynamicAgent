@@ -9,17 +9,41 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
+from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
 
 
 async def dump_to_cache(cache_dir: str):
+    # Dump blueprints
     blueprints = await BlueprintAccessor.get_blueprint_list()
-    result = [bp.model_dump() for bp in blueprints]
+    bp_result = [bp.model_dump() for bp in blueprints]
 
-    out_path = Path(cache_dir) / "knowledge_dump.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+    bp_path = Path(cache_dir) / "knowledge_dump.json"
+    with open(bp_path, "w", encoding="utf-8") as f:
+        json.dump(bp_result, f, ensure_ascii=False, indent=2)
+    print(f"Dumped {len(bp_result)} blueprints to {bp_path}")
 
-    print(f"Dumped {len(result)} blueprints to {out_path}")
+    # Dump instances with attribute values from Milvus
+    instances = await BlueprintAccessor.get_all_instances()
+    instance_result = []
+    for inst in instances:
+        row_ids = [a["row_id"] for a in inst["attributes"]]
+        entities = KnowledgeNodeAccessor.get_by_ids(row_ids) if row_ids else []
+        value_map = {e["id"]: e["value"] for e in entities}
+
+        obj = {
+            "instance_id": inst["instance_id"],
+            "blueprint_id": inst["blueprint_id"],
+            "attributes": {
+                a["attr_name"]: value_map.get(a["row_id"])
+                for a in inst["attributes"]
+            },
+        }
+        instance_result.append(obj)
+
+    inst_path = Path(cache_dir) / "instance_dump.json"
+    with open(inst_path, "w", encoding="utf-8") as f:
+        json.dump(instance_result, f, ensure_ascii=False, indent=2)
+    print(f"Dumped {len(instance_result)} instances to {inst_path}")
 
 
 async def main():

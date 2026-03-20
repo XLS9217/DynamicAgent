@@ -7,7 +7,9 @@ Schema: entity
 ├── value           (VARCHAR)              — the raw attribute text chunk
 ├── embedding       (FLOAT_VECTOR)         — dense vector of value only
 """
+from pymilvus import DataType
 from dynamic_agent_service.data.data_accessor import DataAccessor
+from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 
 COLLECTION_NAME = "entity"
@@ -15,11 +17,26 @@ COLLECTION_NAME = "entity"
 
 class KnowledgeNodeAccessor(DataAccessor):
 
-    dimension: int = 1536
-
     @classmethod
     async def ensure_tables_exist(cls) -> bool:
-        MilvusInstance.create_collection(COLLECTION_NAME, cls.dimension)
+        dimension = KnowledgeEngine.get_dimension()
+        client = MilvusInstance.get_client()
+        if client.has_collection(COLLECTION_NAME):
+            return True
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=64)
+        schema.add_field("instance_id", DataType.VARCHAR, max_length=64)
+        schema.add_field("value", DataType.VARCHAR, max_length=65535)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dimension)
+
+        client.create_collection(COLLECTION_NAME, schema=schema)
+
+        index_params = client.prepare_index_params()
+        index_params.add_index("embedding", index_type="AUTOINDEX", metric_type="COSINE")
+        client.create_index(COLLECTION_NAME, index_params)
+
+        client.load_collection(COLLECTION_NAME)
         return True
 
     @staticmethod

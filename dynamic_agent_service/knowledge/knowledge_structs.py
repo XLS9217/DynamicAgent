@@ -7,6 +7,7 @@ class BlueprintAttributeSchema(BaseModel):
 
 
 class Blueprint(BaseModel):
+    id: str | None = None
     name: str
     description: str
     attributes: dict[str, BlueprintAttributeSchema]

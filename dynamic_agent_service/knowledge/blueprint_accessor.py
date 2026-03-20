@@ -68,6 +68,7 @@ class BlueprintAccessor(DataAccessor):
                 return None
             attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
             return Blueprint(
+                id=blueprint_id,
                 name=row["name"],
                 description=row["description"],
                 attributes={a["name"]: BlueprintAttributeSchema(description=a["description"], is_identifier=a["is_identifier"]) for a in attrs},
@@ -82,6 +83,7 @@ class BlueprintAccessor(DataAccessor):
             for row in rows:
                 attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", row["id"])
                 results.append(Blueprint(
+                    id=row["id"],
                     name=row["name"],
                     description=row["description"],
                     attributes={a["name"]: BlueprintAttributeSchema(description=a["description"], is_identifier=a["is_identifier"]) for a in attrs},
@@ -110,8 +112,50 @@ class BlueprintAccessor(DataAccessor):
         return ids
 
     @staticmethod
+    async def get_instances_by_blueprint(blueprint_id: str) -> list[dict]:
+        """Returns list of {instance_id, attributes: {attr_name: row_id}}"""
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT bi.id, bi.instance_id, ba.name as attr_name
+                FROM blueprint_instance bi
+                JOIN blueprint_attribute ba ON bi.attribute_id = ba.id
+                WHERE ba.blueprint_id = $1
+                ORDER BY bi.instance_id
+            """, blueprint_id)
+        instances = {}
+        for r in rows:
+            iid = r["instance_id"]
+            if iid not in instances:
+                instances[iid] = {"instance_id": iid, "attributes": {}}
+            instances[iid]["attributes"][r["attr_name"]] = r["id"]
+        return list(instances.values())
+
+    @staticmethod
     async def get_instances_by_instance_id(instance_id: str) -> list[BlueprintInstance]:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT id, instance_id, attribute_id FROM blueprint_instance WHERE instance_id = $1", instance_id)
             return [BlueprintInstance(**dict(r)) for r in rows]
+
+    @staticmethod
+    async def get_all_instances() -> list[dict]:
+        """Returns list of {instance_id, blueprint_name, attributes: [{name, instance_row_id}]}"""
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT bi.id, bi.instance_id, bi.attribute_id, ba.name as attr_name, ba.blueprint_id
+                FROM blueprint_instance bi
+                JOIN blueprint_attribute ba ON bi.attribute_id = ba.id
+                ORDER BY bi.instance_id
+            """)
+        instances = {}
+        for r in rows:
+            iid = r["instance_id"]
+            if iid not in instances:
+                instances[iid] = {"instance_id": iid, "blueprint_id": r["blueprint_id"], "attributes": []}
+            instances[iid]["attributes"].append({
+                "row_id": r["id"],
+                "attr_name": r["attr_name"],
+            })
+        return list(instances.values())

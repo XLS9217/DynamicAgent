@@ -1,9 +1,15 @@
 """
-Fill blueprint attributes by chunking relevant original text from raw knowledge
+Extract and organize content from raw text into structured blueprint attributes.
+
+Takes a blueprint schema (attribute names + descriptions) and raw source text, then uses LLM
+to extract relevant content for each attribute. The LLM chunks and formats the content as
+markdown while preserving the original text. Ensures the identifier attribute is never null,
+with a fallback extraction step if needed. Non-identifier attributes can be null if no
+relevant content exists in the source.
 """
 import json
 
-from workflow.json_fix_workflow import JsonFixWorkflow
+from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 FILL_PROMPT = """You are a RAG chunking agent.

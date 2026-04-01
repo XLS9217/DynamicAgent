@@ -1,5 +1,9 @@
 """
-Fix malformed JSON using LLM
+Repair malformed JSON strings using LLM.
+
+Takes broken JSON text and asks LLM to fix it, returning valid parsed dict. Used as
+a fallback when other workflows produce invalid JSON. Simple single-pass correction
+with no validation loop.
 """
 import json
 

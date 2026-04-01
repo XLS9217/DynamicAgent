@@ -1,3 +1,12 @@
+"""
+Base class for all workflows providing LLM invocation, logging, and subflow execution.
+
+Provides the shared infrastructure every workflow depends on: language engine and vision
+engine access, JSONL-based structured logging, and subflow composition. The build_workflow()
+factory handles engine initialization from environment variables and log file setup.
+Workflows are composed by calling execute_subflow(), which shares engines and log bucket
+with child workflows.
+"""
 from abc import ABC, abstractmethod
 from datetime import datetime
 import inspect

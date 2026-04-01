@@ -1,10 +1,16 @@
 """
-Generate blueprint schema (description + attribute:description pairs) from a query
+Create a reusable blueprint schema from a user query and optional reference text.
+
+Generates a blueprint with name, description, and attributes (each with description and
+is_identifier flag). The description must be general and reusable, not instance-specific.
+Includes validation and refinement loop (max 2 retries) to ensure quality: checks for
+proper naming conventions, exactly one identifier attribute, and sufficient coverage of
+the query requirements.
 """
 import json
 
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
-from workflow.json_fix_workflow import JsonFixWorkflow
+from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 GENERATE_PROMPT = """Based on this user query, generate a reusable blueprint schema:

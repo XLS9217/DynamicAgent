@@ -1,5 +1,10 @@
 """
-Extract text from files using VLM
+Convert files to text using vision-language model (VLM).
+
+Converts file (path or bytes) into images, then extracts text and content descriptions
+from each page in parallel using VLM. Returns merged text with page markers. Preserves
+the original language of the content. Handles multi-page documents efficiently with
+concurrent processing.
 """
 import asyncio
 from PIL import Image

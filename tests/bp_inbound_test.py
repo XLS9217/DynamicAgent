@@ -1,8 +1,6 @@
 import os
 import sys
-import json
 import asyncio
-import glob
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -13,7 +11,7 @@ from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEng
 from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
 from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
 from tests.dump_knowledge import dump_to_cache
-from workflow.knowledge_inbound_workflow import KnowledgeInboundWorkflow
+from workflow.inbound.knowledge_inbound_workflow import KnowledgeInboundWorkflow
 from workflow.workflow_base import build_workflow
 
 load_dotenv()
@@ -54,12 +52,18 @@ async def main():
     await KnowledgeEngine.get_embeddings(["init"])
     await KnowledgeNodeAccessor.ensure_tables_exist()
 
-    pdf_files = sorted(glob.glob(os.path.join(PDF_PATH, "*.pdf")))
-    print(f"Found {len(pdf_files)} PDFs in {PDF_PATH}")
-
-    for i, pdf_file in enumerate(pdf_files):
-        print(f"\n--- [{i}] {Path(pdf_file).name} ---")
-        await run_single_test(i, pdf_file, query, knowledge_accessor=BlueprintAccessor)
+    file_index = 0
+    for subfolder in sorted(Path(PDF_PATH).iterdir()):
+        if not subfolder.is_dir():
+            continue
+        pdf_files = sorted(subfolder.glob("*.pdf"))
+        if not pdf_files:
+            continue
+        print(f"\n=== {subfolder.name} ({len(pdf_files)} PDFs) ===")
+        for pdf_file in pdf_files:
+            print(f"\n--- [{file_index}] {pdf_file.name} ---")
+            await run_single_test(file_index, str(pdf_file), query, knowledge_accessor=BlueprintAccessor)
+            file_index += 1
 
     await dump_to_cache(CACHE_DIR)
     await PgInstance.close()

@@ -1,12 +1,16 @@
 """
-Match an inbound query against existing blueprints via LLM.
-If matched, check if attributes are sufficient; if not, upgrade the blueprint.
-If no match, return None so the caller can generate a new one.
+Find and optionally upgrade existing blueprints to match a user query.
+
+Two-stage LLM workflow: (1) semantic matching - compares query against all blueprint
+names, descriptions, and attributes to find the best match; (2) sufficiency check -
+determines if matched blueprint has enough attributes to answer the query. If attributes
+are missing, suggests new ones and merges them into the blueprint. Returns None if no
+semantic match found, signaling the caller to generate a new blueprint.
 """
 import json
 
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint, BlueprintAttributeSchema
-from workflow.json_fix_workflow import JsonFixWorkflow
+from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 MATCH_PROMPT = """Given the user query and a list of existing blueprint schemas, determine which blueprint best matches the query.

@@ -9,7 +9,7 @@ new instance. Generates embeddings for all attribute values and stores in Milvus
 """
 
 from workflow.inbound.blueprint_generation_workflow import BlueprintGenerationWorkflow
-from workflow.retrieve.blueprint_matching_workflow import BlueprintMatchingWorkflow
+from workflow.inbound.inbound_bp_matching_workflow import BlueprintMatchingWorkflow
 from workflow.inbound.file_textification_workflow import FileTextificationWorkflow
 from workflow.workflow_base import WorkflowBase
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine

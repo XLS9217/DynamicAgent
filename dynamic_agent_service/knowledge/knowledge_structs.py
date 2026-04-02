@@ -1,6 +1,11 @@
 from pydantic import BaseModel, model_validator
 
 
+class Bucket(BaseModel):
+    name: str
+    description: str = ""
+
+
 class BlueprintAttributeSchema(BaseModel):
     description: str
     is_identifier: bool = False
@@ -8,6 +13,7 @@ class BlueprintAttributeSchema(BaseModel):
 
 class Blueprint(BaseModel):
     id: str | None = None
+    bucket_name: str
     name: str
     description: str
     attributes: dict[str, BlueprintAttributeSchema]

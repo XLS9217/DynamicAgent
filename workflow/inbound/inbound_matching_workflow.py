@@ -47,10 +47,12 @@ class BlueprintMatchingWorkflow(WorkflowBase):
     def __init__(self):
         super().__init__()
         self.query = ""
+        self.bucket_name = ""
         self.knowledge_accessor = None
 
-    async def build(self, query: str, knowledge_accessor):
+    async def build(self, query: str, bucket_name: str, knowledge_accessor):
         self.query = query
+        self.bucket_name = bucket_name
         self.knowledge_accessor = knowledge_accessor
         return self
 
@@ -108,7 +110,7 @@ class BlueprintMatchingWorkflow(WorkflowBase):
 
     async def execute(self) -> Blueprint | None:
         self.append_log("BlueprintMatchingWorkflow started")
-        blueprints = await self.knowledge_accessor.get_blueprint_list()
+        blueprints = await self.knowledge_accessor.get_blueprint_list(self.bucket_name)
         if not blueprints:
             self.append_log("No existing blueprints, returning None")
             return None

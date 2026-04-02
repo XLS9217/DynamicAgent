@@ -1,7 +1,7 @@
 """
 Knowledge node accessor for Milvus.
 
-Schema: entity
+Schema: bucket_{bucket_name} (one collection per bucket)
 ├── id              (VARCHAR, primary key) — blueprint_instance.id from PG
 ├── instance_id     (VARCHAR)              — groups entities from same ingestion
 ├── value           (VARCHAR)              — the raw attribute text chunk
@@ -12,16 +12,19 @@ from dynamic_agent_service.data.data_accessor import DataAccessor
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 
-COLLECTION_NAME = "entity"
+
+def _collection_name(bucket_name: str) -> str:
+    return f"bucket_{bucket_name.replace('-', '_')}"
 
 
 class KnowledgeNodeAccessor(DataAccessor):
 
     @classmethod
-    async def ensure_tables_exist(cls) -> bool:
+    async def ensure_tables_exist(cls, bucket_name: str) -> bool:
+        collection_name = _collection_name(bucket_name)
         dimension = KnowledgeEngine.get_dimension()
         client = MilvusInstance.get_client()
-        if client.has_collection(COLLECTION_NAME):
+        if client.has_collection(collection_name):
             return True
 
         schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
@@ -30,45 +33,49 @@ class KnowledgeNodeAccessor(DataAccessor):
         schema.add_field("value", DataType.VARCHAR, max_length=65535)
         schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dimension)
 
-        client.create_collection(COLLECTION_NAME, schema=schema)
+        client.create_collection(collection_name, schema=schema)
 
         index_params = client.prepare_index_params()
         index_params.add_index("embedding", index_type="AUTOINDEX", metric_type="COSINE")
-        client.create_index(COLLECTION_NAME, index_params)
+        client.create_index(collection_name, index_params)
 
-        client.load_collection(COLLECTION_NAME)
+        client.load_collection(collection_name)
         return True
 
     @staticmethod
-    def upsert_entities(
-        entities: list[dict],
-    ):
+    def upsert_entities(bucket_name: str, entities: list[dict]):
         """
         Each entity dict: {"id": str, "instance_id": str, "value": str, "embedding": list[float]}
         """
-        MilvusInstance.upsert(COLLECTION_NAME, entities)
+        collection_name = _collection_name(bucket_name)
+        collection_name = _collection_name(bucket_name)
+        MilvusInstance.upsert(collection_name, entities)
 
     @staticmethod
     def search(
+        bucket_name: str,
         query_embedding: list[float],
         top_k: int = 10,
     ) -> list[dict]:
+        collection_name = _collection_name(bucket_name)
         return MilvusInstance.search(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             query_vector=query_embedding,
             top_k=top_k,
             output_fields=["instance_id", "value"],
         )
 
     @staticmethod
-    def get_by_ids(ids: list[str]) -> list[dict]:
+    def get_by_ids(bucket_name: str, ids: list[str]) -> list[dict]:
+        collection_name = _collection_name(bucket_name)
         client = MilvusInstance.get_client()
         return client.get(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             ids=ids,
             output_fields=["instance_id", "value"],
         )
 
     @staticmethod
-    def delete_by_ids(ids: list[str]):
-        MilvusInstance.delete(COLLECTION_NAME, ids)
+    def delete_by_ids(bucket_name: str, ids: list[str]):
+        collection_name = _collection_name(bucket_name)
+        MilvusInstance.delete(collection_name, ids)

@@ -2,8 +2,8 @@
 Blueprint accessor for PostgreSQL.
 
 Tables:
-  blueprint            (id, name, description)
-  blueprint_attribute  (id, blueprint_id, name, description)
+  blueprint            (id, bucket_name, name, description)
+  blueprint_attribute  (id, blueprint_id, name, description, is_identifier)
   blueprint_instance   (id, instance_id, attribute_id)
 """
 import uuid
@@ -24,6 +24,7 @@ class BlueprintAccessor(DataAccessor):
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS blueprint (
                     id          TEXT PRIMARY KEY,
+                    bucket_name TEXT NOT NULL REFERENCES bucket(name),
                     name        TEXT NOT NULL,
                     description TEXT NOT NULL
                 );
@@ -48,8 +49,8 @@ class BlueprintAccessor(DataAccessor):
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO blueprint (id, name, description) VALUES ($1, $2, $3)",
-                bp_id, blueprint.name, blueprint.description,
+                "INSERT INTO blueprint (id, bucket_name, name, description) VALUES ($1, $2, $3, $4)",
+                bp_id, blueprint.bucket_name, blueprint.name, blueprint.description,
             )
             for attr_name, attr_schema in blueprint.attributes.items():
                 attr_id = str(uuid.uuid4())
@@ -63,27 +64,29 @@ class BlueprintAccessor(DataAccessor):
     async def get_blueprint(blueprint_id: str) -> Blueprint | None:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT name, description FROM blueprint WHERE id = $1", blueprint_id)
+            row = await conn.fetchrow("SELECT bucket_name, name, description FROM blueprint WHERE id = $1", blueprint_id)
             if row is None:
                 return None
             attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
             return Blueprint(
                 id=blueprint_id,
+                bucket_name=row["bucket_name"],
                 name=row["name"],
                 description=row["description"],
                 attributes={a["name"]: BlueprintAttributeSchema(description=a["description"], is_identifier=a["is_identifier"]) for a in attrs},
             )
 
     @staticmethod
-    async def get_blueprint_list() -> list[Blueprint]:
+    async def get_blueprint_list(bucket_name: str) -> list[Blueprint]:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, name, description FROM blueprint")
+            rows = await conn.fetch("SELECT id, bucket_name, name, description FROM blueprint WHERE bucket_name = $1", bucket_name)
             results = []
             for row in rows:
                 attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", row["id"])
                 results.append(Blueprint(
                     id=row["id"],
+                    bucket_name=row["bucket_name"],
                     name=row["name"],
                     description=row["description"],
                     attributes={a["name"]: BlueprintAttributeSchema(description=a["description"], is_identifier=a["is_identifier"]) for a in attrs},
@@ -139,16 +142,18 @@ class BlueprintAccessor(DataAccessor):
             return [BlueprintInstance(**dict(r)) for r in rows]
 
     @staticmethod
-    async def get_all_instances() -> list[dict]:
-        """Returns list of {instance_id, blueprint_name, attributes: [{name, instance_row_id}]}"""
+    async def get_all_instances(bucket_name: str) -> list[dict]:
+        """Returns list of {instance_id, blueprint_id, attributes: [{name, instance_row_id}]}"""
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT bi.id, bi.instance_id, bi.attribute_id, ba.name as attr_name, ba.blueprint_id
                 FROM blueprint_instance bi
                 JOIN blueprint_attribute ba ON bi.attribute_id = ba.id
+                JOIN blueprint b ON ba.blueprint_id = b.id
+                WHERE b.bucket_name = $1
                 ORDER BY bi.instance_id
-            """)
+            """, bucket_name)
         instances = {}
         for r in rows:
             iid = r["instance_id"]

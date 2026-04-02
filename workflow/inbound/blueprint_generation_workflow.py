@@ -71,10 +71,12 @@ class BlueprintGenerationWorkflow(WorkflowBase):
     def __init__(self):
         super().__init__()
         self.query = ""
+        self.bucket_name = ""
         self.raw_text = None
 
-    async def build(self, query: str, raw_text: str = None):
+    async def build(self, query: str, bucket_name: str, raw_text: str = None):
         self.query = query
+        self.bucket_name = bucket_name
         self.raw_text = raw_text
         return self
 
@@ -136,4 +138,5 @@ class BlueprintGenerationWorkflow(WorkflowBase):
             blueprint = await self._refine(blueprint, issues)
 
         self.append_log("BlueprintGenerationWorkflow completed")
+        blueprint["bucket_name"] = self.bucket_name
         return Blueprint(**blueprint)

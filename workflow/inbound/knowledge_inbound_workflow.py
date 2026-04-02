@@ -1,16 +1,16 @@
 """
-End-to-end workflow for ingesting files into the knowledge base.
+End-to-end workflow for ingesting knowledge text into the knowledge base.
 
-Orchestrates the full inbound pipeline: (1) textify file using VLM, (2) match or generate
-blueprint schema, (3) fill blueprint attributes from extracted text, (4) persist to database
-with collision detection and merging. Handles entity deduplication by asking LLM if new
-identifier matches existing ones. If collision detected, merges attributes; otherwise creates
-new instance. Generates embeddings for all attribute values and stores in Milvus.
+Orchestrates the inbound pipeline: (1) match or generate blueprint schema, (2) fill blueprint
+attributes from text, (3) persist to database with collision detection and merging. Handles
+entity deduplication by asking LLM if new identifier matches existing ones. If collision
+detected, merges attributes; otherwise creates new instance. Generates embeddings for all
+attribute values and stores in Milvus.
 """
 
 from workflow.inbound.blueprint_generation_workflow import BlueprintGenerationWorkflow
-from workflow.inbound.inbound_bp_matching_workflow import BlueprintMatchingWorkflow
-from workflow.inbound.file_textification_workflow import FileTextificationWorkflow
+from workflow.inbound.blueprint_filling_workflow import BlueprintFillingWorkflow
+from workflow.inbound.inbound_matching_workflow import BlueprintMatchingWorkflow
 from workflow.workflow_base import WorkflowBase
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
 from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
@@ -51,34 +51,29 @@ If no, respond with ONLY: NONE"""
 class KnowledgeInboundWorkflow(WorkflowBase):
     def __init__(self):
         super().__init__()
-        self.file_source = None
-        self.filetype = None
+        self.knowledge_text = ""
         self.inbound_query = ""
+        self.bucket_name = ""
         self.knowledge_accessor = None
-        self._raw_knowledge_text = ""
         self._blueprint_schema = None
         self._filled_blueprint = {}
 
-    async def build(self, file_source: str | bytes, filetype: str, inbound_query: str, knowledge_accessor=None):
-        self.file_source = file_source
-        self.filetype = filetype
+    async def build(self, knowledge_text: str, inbound_query: str, bucket_name: str, knowledge_accessor=None):
+        self.knowledge_text = knowledge_text
         self.inbound_query = inbound_query
+        self.bucket_name = bucket_name
         self.knowledge_accessor = knowledge_accessor
         return self
 
     async def execute(self) -> dict:
         self.append_log("Knowledge inbound started")
-        self._raw_knowledge_text = await self.execute_subflow(
-            FileTextificationWorkflow,
-            self.file_source,
-            self.filetype
-        )
-        self.append_log(f"Extracted {len(self._raw_knowledge_text)} characters")
+        self.append_log(f"Processing {len(self.knowledge_text)} characters")
 
         if self.knowledge_accessor:
             self._blueprint_schema = await self.execute_subflow(
                 BlueprintMatchingWorkflow,
                 self.inbound_query,
+                self.bucket_name,
                 self.knowledge_accessor
             )
 
@@ -86,7 +81,8 @@ class KnowledgeInboundWorkflow(WorkflowBase):
             self.append_log("No matching blueprint found, generating new one")
             self._blueprint_schema = await self.execute_subflow(
                 BlueprintGenerationWorkflow,
-                self.inbound_query
+                self.inbound_query,
+                self.bucket_name
             )
             if self.knowledge_accessor:
                 self._blueprint_schema.id = await self.knowledge_accessor.create_blueprint(self._blueprint_schema)
@@ -98,7 +94,7 @@ class KnowledgeInboundWorkflow(WorkflowBase):
         self._filled_blueprint = await self.execute_subflow(
             BlueprintFillingWorkflow,
             {k: v.description for k, v in self._blueprint_schema.attributes.items()},
-            self._raw_knowledge_text,
+            self.knowledge_text,
             identifier_name
         )
         self.append_log(f"Filled {len(self._filled_blueprint)} blueprint attributes")
@@ -127,7 +123,7 @@ class KnowledgeInboundWorkflow(WorkflowBase):
             id_row_id = inst["attributes"].get(identifier_name)
             if not id_row_id:
                 continue
-            entities = KnowledgeNodeAccessor.get_by_ids([id_row_id])
+            entities = KnowledgeNodeAccessor.get_by_ids(self.bucket_name, [id_row_id])
             if entities:
                 candidates[entities[0]["value"]] = inst
 
@@ -165,13 +161,13 @@ class KnowledgeInboundWorkflow(WorkflowBase):
             {"id": row_id, "instance_id": instance_id, "value": value, "embedding": embedding}
             for row_id, value, embedding in zip(instance_row_ids, filled_values, embeddings)
         ]
-        KnowledgeNodeAccessor.upsert_entities(entities)
+        KnowledgeNodeAccessor.upsert_entities(self.bucket_name, entities)
         self.append_log(f"Upserted {len(entities)} entities to Milvus")
 
     async def _merge_instance(self, existing: dict, attr_name_to_id: dict[str, str]):
         instance_id = existing["instance_id"]
         existing_row_ids = list(existing["attributes"].values())
-        existing_entities = KnowledgeNodeAccessor.get_by_ids(existing_row_ids)
+        existing_entities = KnowledgeNodeAccessor.get_by_ids(self.bucket_name, existing_row_ids)
         existing_values = {e["id"]: e["value"] for e in existing_entities}
 
         to_upsert = []
@@ -209,5 +205,5 @@ class KnowledgeInboundWorkflow(WorkflowBase):
                 new_idx += 1
             entities.append({"id": row_id, "instance_id": instance_id, "value": value, "embedding": embedding})
 
-        KnowledgeNodeAccessor.upsert_entities(entities)
+        KnowledgeNodeAccessor.upsert_entities(self.bucket_name, entities)
         self.append_log(f"Merged instance {instance_id}: updated {len(entities)} entities")

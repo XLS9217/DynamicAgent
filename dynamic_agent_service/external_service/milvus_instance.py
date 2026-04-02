@@ -1,6 +1,6 @@
 import os
 from typing import Optional, List, Dict, Any
-from pymilvus import MilvusClient
+from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
@@ -47,6 +47,65 @@ class MilvusInstance:
         flat = results[0] if results else []
         logger.info(f"Retrieved {len(flat)} results from collection '{collection_name}'")
         return flat
+
+    @classmethod
+    def hybrid_search(
+        cls,
+        collection_name: str,
+        query_vector: List[float],
+        query_text: str,
+        top_k: int = 10,
+        embedding_weight: float = 0.5,
+        bm25_weight: float = 0.5,
+        output_fields: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Hybrid search combining dense vector (ANN) and sparse retrieval (BM25).
+
+        Uses native Milvus hybrid_search with RRFRanker for result fusion.
+        """
+        client = cls.get_client()
+        output_fields = output_fields or []
+
+        # Dense vector search request
+        dense_req = AnnSearchRequest(
+            data=[query_vector],
+            anns_field="embedding",
+            param={"metric_type": "COSINE"},
+            limit=top_k * 2
+        )
+
+        # BM25 sparse search request (pass text directly, Milvus converts to sparse vector)
+        sparse_req = AnnSearchRequest(
+            data=[query_text],
+            anns_field="sparse_vector",
+            param={"metric_type": "BM25"},
+            limit=top_k * 2
+        )
+
+        # Native hybrid search with WeightedRanker
+        # Weights order matches reqs order: [dense_weight, sparse_weight]
+        results = client.hybrid_search(
+            collection_name=collection_name,
+            reqs=[dense_req, sparse_req],
+            ranker=WeightedRanker(embedding_weight, bm25_weight),
+            limit=top_k,
+            output_fields=output_fields
+        )
+
+        # Flatten results structure
+        flat_results = []
+        for hit in results[0]:
+            item = {'id': hit['id'], 'distance': hit['distance']}
+            # Fields are nested under 'entity' in hybrid search results
+            entity = hit.get('entity', {})
+            for field in output_fields:
+                if field in entity:
+                    item[field] = entity[field]
+            flat_results.append(item)
+
+        logger.info(f"Hybrid search retrieved {len(flat_results)} results from collection '{collection_name}'")
+        return flat_results
 
     @classmethod
     def delete(

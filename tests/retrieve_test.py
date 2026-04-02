@@ -8,9 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 from dynamic_agent_service.external_service.pg_instance import PgInstance
-from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
-from workflow.retrieve.knowledge_retrieve_workflow import KnowledgeRetrieveWorkflow
-from workflow.workflow_base import build_workflow
+from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 
 load_dotenv()
 
@@ -51,20 +49,11 @@ async def run_query_test(query_config: dict, bucket_cache: Path):
     print(f"Type: {query_config['description']}")
     print(f"{'='*60}")
 
-    # Use KnowledgeRetrieveWorkflow
+    # Use KnowledgeInterface.retrieve
     top_k = 10
-    print(f"\nRunning retrieve workflow with top_k={top_k}...")
+    print(f"\nRunning retrieve with top_k={top_k}...")
 
-    retrieve_wf = await build_workflow(
-        KnowledgeRetrieveWorkflow,
-        query,
-        BUCKET_NAME,
-        top_k,
-        knowledge_accessor=BlueprintAccessor,
-        workflow_bucket=query_cache / "retrieve_workflow.jsonl"
-    )
-
-    reconstructed = await retrieve_wf.execute()
+    reconstructed = await KnowledgeInterface.retrieve(query, BUCKET_NAME, top_k)
 
     print(f"Reconstructed {len(reconstructed)} instances")
 

@@ -7,6 +7,7 @@ from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.operator import OperatorHandler
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
+from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 
 logger = get_my_logger()
 
@@ -14,6 +15,9 @@ SYSTEM_MESSAGE_TEMPLATE = """
 Your setting is:
 {{setting}}
 
+Here is your RAG result:
+{{rag_result}}
+Use it to respond
 
 For tool calling:
 1. Use the menu to execute the tool call
@@ -53,6 +57,7 @@ class AgentGeneralInterface:
 
         self._operator_handler = OperatorHandler()
         self._session_logger = None
+        self._bucket_name = None  # RAG bucket name
 
     @classmethod
     async def create(
@@ -65,6 +70,7 @@ class AgentGeneralInterface:
             tool_execute: Callable = None,
             stream_callback: Callable = None,
             session_logger = None,
+            bucket_name: str = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
@@ -74,13 +80,25 @@ class AgentGeneralInterface:
         agi._stream_callback = stream_callback
         agi._operator_handler.tool_execute = tool_execute
         agi._session_logger = session_logger
+        agi._bucket_name = bucket_name
         return agi
 
     async def trigger(
         self,
         message: dict,
     ) -> str:
-        invoke_messages = await self._forge_message_list(message.get("text", ""))
+        # RAG: Retrieve knowledge before answering
+        retrieved_knowledge = None
+        if self._bucket_name:
+            user_query = message.get("text", "")
+            retrieved_knowledge = await KnowledgeInterface.retrieve(
+                query=user_query,
+                bucket_name=self._bucket_name,
+                top_k=10
+            )
+            logger.info(f"Retrieved {len(retrieved_knowledge)} knowledge instances")
+
+        invoke_messages = await self._forge_message_list(message.get("text", ""), retrieved_knowledge)
 
         full_assistant_text = ""
 
@@ -138,10 +156,10 @@ class AgentGeneralInterface:
     def register_operator(self, operator_data: dict):
         self._operator_handler.register_operator(operator_data)
 
-    async def _forge_message_list(self, user_message: str) -> list:
+    async def _forge_message_list(self, user_message: str, retrieved_knowledge: list[dict] | None = None) -> list:
         """
         1. compact messages if over limit
-        2. forge system message
+        2. forge system message (with RAG result if knowledge retrieved)
         3. append context messages
         4. append user message
         5. return the message list
@@ -150,7 +168,21 @@ class AgentGeneralInterface:
             await self._compact_messages()
 
         operator_menu = self._operator_handler.get_menu()
-        system_content = self._system_message_template.replace("{{setting}}", self._setting).replace("{{operator_menu}}", operator_menu)
+
+        # Build RAG result section
+        rag_result = ""
+        if retrieved_knowledge:
+            for i, instance in enumerate(retrieved_knowledge, 1):
+                rag_result += f"\n--- Knowledge {i} ---\n"
+                for attr_name, attr_value in instance.items():
+                    rag_result += f"{attr_name}: {attr_value}\n"
+
+        system_content = (
+            self._system_message_template
+            .replace("{{setting}}", self._setting)
+            .replace("{{rag_result}}", rag_result)
+            .replace("{{operator_menu}}", operator_menu)
+        )
 
         return [
             {"role": "system", "content": system_content},

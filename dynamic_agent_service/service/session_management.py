@@ -1,5 +1,4 @@
 import asyncio
-import logging
 import time
 import uuid
 import httpx
@@ -9,7 +8,7 @@ from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInte
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest
 from dynamic_agent_service.util.setup_logging import get_my_logger
-from dynamic_agent_service.util.SessionLogger import SessionLogger
+from service.session_logger import SessionLogger
 
 logger = get_my_logger()
 

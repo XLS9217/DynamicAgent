@@ -46,14 +46,16 @@ class MathOperator(AgentOperator):
 
 
 async def main():
-    # 1. Connect to the service and create a session
+    # 1. Connect to the service
+    await DynamicAgentClient.connect(server_addr="http://localhost:7777")
+
+    # 2. Create a session
     client = await DynamicAgentClient.create(
         setting="You are a helpful math assistant.",
-        server_addr="http://localhost:7777",
     )
     print(f"Session created: {client.session_id}")
 
-    # 2. Register the MathOperator
+    # 3. Register the MathOperator
     op = MathOperator()
     result = await client.add_operator(op)
     print(f"Operator registered: {result}")

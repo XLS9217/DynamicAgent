@@ -4,7 +4,7 @@ from typing import Callable
 from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
-from dynamic_agent_service.agent.operator_handler import OperatorHandler
+from dynamic_agent_service.operator import OperatorHandler
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
 

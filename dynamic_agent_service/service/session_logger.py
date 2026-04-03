@@ -12,15 +12,11 @@ load_dotenv()
 class SessionLogger:
 
     def __init__(self, session_id: str):
-        """
-        use .env to find cache folder, everything says in CACHE_FOLDER_PATH/session_log/session_id/file.log
-        """
         self.session_id = session_id
         cache_folder = os.getenv("CACHE_DIR")
         self.log_dir = Path(cache_folder) / "session_log" / session_id
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.trigger_count = 0
-        self.current_trigger_file = None
+        self._current_invoke_file = None
         self._write_queue = asyncio.Queue()
         self._writer_task = None
 
@@ -43,34 +39,29 @@ class SessionLogger:
         if self._writer_task is None or self._writer_task.done():
             self._writer_task = asyncio.create_task(self._writer_loop())
 
-    def log(self, file: str, line: dict):
-        """
-        Fire-and-forget log. Returns immediately without waiting for write.
-        """
+    def _write(self, file: str, line: dict):
+        """Fire-and-forget write to a file."""
         self._ensure_writer()
         self._write_queue.put_nowait((file, line))
 
-    def trigger_new(self, tools: list, init_messages: list):
-        """
-        Start a new trigger log. Increment count, log tools and initial messages.
-        Returns the trigger file name.
-        """
-        self.trigger_count += 1
-        self.current_trigger_file = f"trigger_{self.trigger_count}"
+    # --- System-level logging (session_system_log.jsonl) ---
 
-        # Log tools
-        for tool in tools:
-            self.log(self.current_trigger_file, {"type": "tool", "tool": tool})
+    def log_system(self, event: str, data: dict = None):
+        """Log a lifecycle/system event to session_system_log.jsonl."""
+        line = {"event": event}
+        if data:
+            line["data"] = data
+        self._write("session_system_log", line)
 
-        # Log initial messages
-        for msg in init_messages:
-            self.log(self.current_trigger_file, msg)
+    # --- Invoke-level logging (invoke_YYYYMMDD_HHMMSS.jsonl) ---
 
-        return self.current_trigger_file
+    def invoke_new(self):
+        """Start a new invoke log file. Named by current timestamp."""
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        self._current_invoke_file = f"invoke_{ts}"
+        return self._current_invoke_file
 
-    def trigger_log(self, line: dict):
-        """
-        Log a line to the current trigger file (fire-and-forget).
-        """
-        if self.current_trigger_file:
-            self.log(self.current_trigger_file, line)
+    def invoke_log(self, line: dict):
+        """Log a line to the current invoke file."""
+        if self._current_invoke_file:
+            self._write(self._current_invoke_file, line)

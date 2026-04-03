@@ -13,6 +13,7 @@ class CreateSessionRequest(BaseModel):
     messages: list = []
     compact_limit: int = None
     compact_target: int = None
+    bucket_name: str = None
 
 
 class AgentResponseChunk(BaseModel):

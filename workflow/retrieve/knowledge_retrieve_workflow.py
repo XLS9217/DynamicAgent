@@ -30,14 +30,16 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         self.query = ""
         self.bucket_name = ""
         self.top_k = 10
+        self.score_threshold = 0.3
         self.knowledge_accessor = None
         self._embedding_weight = 0.5
         self._bm25_weight = 0.5
 
-    async def build(self, query: str, bucket_name: str, top_k: int = 10, knowledge_accessor=None):
+    async def build(self, query: str, bucket_name: str, top_k: int = 10, score_threshold: float = 0.3, knowledge_accessor=None):
         self.query = query
         self.bucket_name = bucket_name
         self.top_k = top_k
+        self.score_threshold = score_threshold
         self.knowledge_accessor = knowledge_accessor
         return self
 
@@ -115,11 +117,24 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         Returns:
             List of instances (just filled_attributes dicts)
         """
+        # Filter by score threshold first (at node level)
+        before_count = len(search_results)
+        for r in search_results:
+            self.append_log(f"Node {r['id']} distance={r.get('distance', 0.0):.4f}")
+
+        filtered_results = [r for r in search_results if r.get("distance", 0.0) >= self.score_threshold]
+        filtered_count = before_count - len(filtered_results)
+        self.append_log(f"Score threshold={self.score_threshold}: kept {len(filtered_results)} nodes, filtered {filtered_count} nodes")
+
+        if not filtered_results:
+            self.append_log("No results passed threshold, returning empty")
+            return []
+
         self.append_log("Grouping results by instance_id")
 
         # Group by instance_id
         instance_groups = {}
-        for r in search_results:
+        for r in filtered_results:
             iid = r["instance_id"]
             if iid not in instance_groups:
                 instance_groups[iid] = {"nodes": [], "total_distance": 0.0}
@@ -129,6 +144,7 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         # Calculate average distance per instance
         for iid, group in instance_groups.items():
             group["avg_distance"] = group["total_distance"] / len(group["nodes"])
+            self.append_log(f"Instance {iid[:8]}... avg_distance={group['avg_distance']:.4f} nodes={len(group['nodes'])}")
 
         self.append_log(f"Found {len(instance_groups)} unique instances")
 

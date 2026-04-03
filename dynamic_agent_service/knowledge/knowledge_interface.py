@@ -27,7 +27,7 @@ class KnowledgeInterface:
         return await inbound_wf.execute()
 
     @classmethod
-    async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
+    async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10, score_threshold: float = 0.3):
         """
         Retrieve entry point for searching knowledge.
         Returns reconstructed blueprint instances matching the query.
@@ -36,6 +36,7 @@ class KnowledgeInterface:
             query: Natural language search query
             bucket_name: Bucket to search in
             top_k: Number of knowledge nodes to retrieve
+            score_threshold: Minimum avg distance score (0-1, higher=more relevant). Default 0.3
 
         Returns:
             List of reconstructed instances with filled attributes
@@ -45,6 +46,7 @@ class KnowledgeInterface:
             query,
             bucket_name,
             top_k,
+            score_threshold,
             knowledge_accessor=BlueprintAccessor
         )
         return await retrieve_wf.execute()

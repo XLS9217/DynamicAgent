@@ -8,7 +8,7 @@ from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInte
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest
 from dynamic_agent_service.util.setup_logging import get_my_logger
-from service.session_logger import SessionLogger
+from dynamic_agent_service.service.session_logger import SessionLogger
 
 logger = get_my_logger()
 
@@ -23,7 +23,7 @@ class RealtimeSession:
             cls._http = httpx.AsyncClient(mounts={"http://": None})
         return cls._http
 
-    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, messages: list = None, compact_limit: int = None, compact_target: int = None):
+    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, messages: list = None, compact_limit: int = None, compact_target: int = None, bucket_name: str = None):
         self.session_id = str(uuid.uuid4())
         self.setting = setting
         self.messages = messages or []
@@ -31,6 +31,7 @@ class RealtimeSession:
         self.compact_target = compact_target
         self.webhook_url = webhook_url
         self.reconnect_keep = reconnect_keep
+        self.bucket_name = bucket_name
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
@@ -58,19 +59,23 @@ class RealtimeSession:
             compact_target=self.compact_target,
             tool_execute=tool_execute,
             session_logger=self.session_logger,
+            bucket_name=self.bucket_name,
         )
         logger.info("AGI initialized for session %s", self.session_id)
-        # Log session initialization (one log per setting, fire-and-forget)
-        self.session_logger.log("setting", {"key": "session_id", "value": self.session_id})
-        self.session_logger.log("setting", {"key": "setting", "value": self.setting})
-        self.session_logger.log("setting", {"key": "compact_limit", "value": self.compact_limit})
-        self.session_logger.log("setting", {"key": "compact_target", "value": self.compact_target})
-        self.session_logger.log("setting", {"key": "webhook_url", "value": self.webhook_url})
-        self.session_logger.log("setting", {"key": "reconnect_keep", "value": self.reconnect_keep})
+        self.session_logger.log_system("agent_setup", {
+            "session_id": self.session_id,
+            "setting": self.setting,
+            "compact_limit": self.compact_limit,
+            "compact_target": self.compact_target,
+            "webhook_url": self.webhook_url,
+            "reconnect_keep": self.reconnect_keep,
+            "bucket_name": self.bucket_name,
+        })
 
     def attach_websocket(self, client: WebSocket):
         self.client = client
         self.disconnect_time = None
+        self.session_logger.log_system("websocket_connected")
 
         async def stream_callback(chunk: AgentResponseChunk):
             await self.client.send_json(chunk.model_dump())
@@ -80,6 +85,7 @@ class RealtimeSession:
     def register_operator(self, operator_data: dict):
         """Forward the serialized operator data to AGI for registration."""
         self.agi.register_operator(operator_data)
+        self.session_logger.log_system("operator_registered", {"operator_name": operator_data.get("name")})
 
     def is_expired(self) -> bool:
         """Check if session has been disconnected longer than reconnect_keep seconds."""
@@ -131,7 +137,8 @@ class RealtimeSessionManager:
             reconnect_keep=request.reconnect_keep,
             messages=request.messages,
             compact_limit=request.compact_limit,
-            compact_target=request.compact_target
+            compact_target=request.compact_target,
+            bucket_name=request.bucket_name,
         )
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()
@@ -145,6 +152,7 @@ class RealtimeSessionManager:
     def mark_disconnected(cls, session: RealtimeSession):
         """Mark session as disconnected, starts reconnect_keep countdown."""
         session.disconnect_time = time.time()
+        session.session_logger.log_system("websocket_disconnected")
         logger.info("Session %s marked disconnected, will expire in %s seconds", session.session_id, session.reconnect_keep)
 
     @classmethod

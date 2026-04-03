@@ -1,6 +1,11 @@
 import logging
 import sys
+import os
+from pathlib import Path
 from colorama import Fore, Style
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class ColorFormatter(logging.Formatter):
     LEVEL_COLORS = {
@@ -19,9 +24,21 @@ class ColorFormatter(logging.Formatter):
 def my_logger_setup():
     logger = logging.getLogger("src")
     logger.setLevel(logging.DEBUG)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(ColorFormatter())
-    logger.addHandler(handler)
+
+    # Console handler with colors
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(ColorFormatter())
+    logger.addHandler(console_handler)
+
+    # File handler (plain, no colors)
+    cache_dir = os.getenv("CACHE_DIR")
+    if cache_dir:
+        log_dir = Path(cache_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_dir / "system.log", encoding="utf-8")
+        file_handler.setFormatter(logging.Formatter("[%(levelname)s] - [%(filename)s:%(lineno)d] - %(message)s"))
+        logger.addHandler(file_handler)
+
     logger.propagate = False
 
 def get_my_logger():

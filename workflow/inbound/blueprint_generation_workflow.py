@@ -98,6 +98,12 @@ class BlueprintGenerationWorkflow(WorkflowBase):
     async def _validate(self, blueprint: dict) -> str | None:
         """Returns None if valid, issues string if not"""
         self.append_log("Validating blueprint quality")
+
+        # Check identifier count first
+        identifier_count = sum(1 for attr in blueprint.get("attributes", {}).values() if attr.get("is_identifier", False))
+        if identifier_count != 1:
+            return f"NO\n<issues>\n- Blueprint has {identifier_count} identifier attributes, must have exactly 1\n</issues>"
+
         prompt = VALIDATE_PROMPT.format(
             query=self.query,
             blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)

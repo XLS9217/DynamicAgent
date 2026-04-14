@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from dotenv import load_dotenv
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
-from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
+from dynamic_agent_service.knowledge.bucket_accessor import KnowledgeAccessor
 from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
 from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
 from dynamic_agent_service.knowledge.knowledge_structs import Bucket

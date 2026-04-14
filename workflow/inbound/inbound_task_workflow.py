@@ -1,12 +1,10 @@
 """
 Inbound task workflow for multi-entity knowledge inbound.
 
-Single-stage process:
-Match blueprints: identify entity types and return blueprint names and generation queries
-
-Returns:
-- blueprint_names: list of matched blueprint names
-- generate_queries: list of queries for generating new blueprints
+Flow:
+1. Detect entities from user query (what types of entities to extract)
+2. Match detected entities to existing blueprints or generate new ones
+3. Create fill tasks for each entity instance found in the text
 """
 import json
 
@@ -16,37 +14,68 @@ from workflow.workflow_base import WorkflowBase
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
 
 
-MATCH_PROMPT = """Analyze the text and identify all entity types based on the user query.
+DETECT_PROMPT = """Analyze the user query to determine extraction mode.
 
 User Query: {inbound_query}
 
----
+Does the user want to extract ONE entity or MULTIPLE entities?
+
+Output one word: "single" or "multiple"
+
+Examples:
+- "record THIS product" → single
+- "这个产品" → single
+- "find all products" → multiple
+- "所有的产品" → multiple
+"""
+
+
+MATCH_SINGLE_PROMPT = """Analyze the text and identify ONE entity type to extract.
+
+User Query: {inbound_query}
 
 Knowledge Text:
 {knowledge_text}
 
----
+Existing Blueprints:
+{existing_blueprints}
+
+The user wants to extract ONE entity from this text.
+
+If an existing blueprint matches, output:
+{{"blueprint_name": "Name"}}
+
+If no match, output:
+{{"generate_query": "A <Blueprint Name> blueprint, it describes <what>, it will have attributes <attr1>, <attr2>, <attr3>"}}
+
+Rules:
+- Blueprint name should be generic (e.g., "Product", "Document", "Person")
+- List attributes from the user query
+"""
+
+
+MATCH_MULTIPLE_PROMPT = """Analyze the text and identify all entity types to extract.
+
+User Query: {inbound_query}
+
+Knowledge Text:
+{knowledge_text}
 
 Existing Blueprints:
 {existing_blueprints}
 
-For each entity type you identify:
-- If it matches an existing blueprint, add the blueprint name to "blueprint_names"
-- If no match exists, add a description to "generate_queries" in this format:
-  "A <Blueprint Name> blueprint, it is about <description>, it will have attributes <attr1>, <attr2>, <attr3>"
+The user wants to extract MULTIPLE entities from this text.
 
 Output as JSON:
 {{
-  "blueprint_names": ["Name", "AnotherName", ...],
-  "generate_queries": ["A blueprint for Entity, it is about...", "A blueprint for AnotherEntity, it is about...", ...]
+  "blueprint_names": ["Name1", "Name2", ...],
+  "generate_queries": ["A blueprint for...", ...]
 }}
 
 Rules:
-- Only include entities relevant to the user query, use wording inside user query if possible
-- blueprint_names should contain existing blueprint names that match
-- generate_queries should follow the exact format: "A <BlueprintName> blueprint, it is about <description>, it will have attributes <list>"
-- Blueprint names should be human-readable with proper capitalization (e.g., "Entity", "AnotherEntity"...)
-- List all necessary attributes that would be needed for each entity type, based on user's query
+- Return all relevant entity types
+- Blueprint names should be generic
+- List attributes from the user query
 """
 
 
@@ -92,37 +121,58 @@ class InboundTaskWorkflow(WorkflowBase):
 
     async def execute(self) -> list[dict]:
         """
-        Returns: list of {"enriched_query": str, "blueprint": Blueprint, "knowledge_text": str}
+        Returns: list of {"enriched_query": str, "blueprint": Blueprint}
         """
         self.append_log("InboundTaskWorkflow started")
 
-        result = await self._match_blueprints()
+        # Step 1: Detect mode (single or multiple)
+        mode = await self._detect_mode()
 
-        all_blueprints = []
+        # Step 2: Route to single or multiple matching
+        if mode == "single":
+            all_blueprints = await self._match_single()
+        else:
+            all_blueprints = await self._match_multiple()
 
-        if result['blueprint_names']:
-            matched = await self.knowledge_accessor.get_blueprint_list(self.bucket_name)
-            for name in result['blueprint_names']:
-                bp = next((b for b in matched if b.name == name), None)
-                if bp:
-                    all_blueprints.append(bp)
-
-        if result['generate_queries']:
-            self.append_log(f"Generating {len(result['generate_queries'])} new blueprints")
-            generated = await self._generate_blueprints(result['generate_queries'])
-            all_blueprints.extend(generated)
-
-        tasks = await self._create_tasks(all_blueprints)
+        # Step 3: Create tasks (skip TASK_PROMPT for single mode)
+        if mode == "single":
+            tasks = []
+            for blueprint in all_blueprints:
+                tasks.append({
+                    "enriched_query": self.inbound_query,
+                    "blueprint": blueprint
+                })
+            self.append_log(f"Single mode: created {len(tasks)} task(s) directly")
+        else:
+            tasks = await self._create_tasks(all_blueprints)
 
         self.append_log(f"Workflow complete: created {len(tasks)} fill tasks")
         return tasks
 
-    async def _match_blueprints(self) -> dict:
+    async def _detect_mode(self) -> str:
         """
-        Identify entity types and match/generate blueprints
-        Returns: {"blueprint_names": [...], "generate_queries": [...]}
+        Determine if user wants single or multiple entity extraction.
+        Returns: "single" or "multiple"
         """
-        self.append_log("Matching/generating blueprints")
+        self.append_log("Detecting extraction mode")
+
+        prompt = DETECT_PROMPT.format(inbound_query=self.inbound_query)
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
+        mode = raw.strip().lower().strip('"')
+
+        if mode not in ("single", "multiple"):
+            self.append_log(f"Unexpected mode '{mode}', defaulting to multiple")
+            mode = "multiple"
+
+        self.append_log(f"Mode: {mode}")
+        return mode
+
+    async def _match_single(self) -> list[Blueprint]:
+        """
+        Match or generate ONE blueprint for single entity extraction.
+        Returns: list with one Blueprint
+        """
+        self.append_log("Matching single blueprint")
 
         blueprints = await self.knowledge_accessor.get_blueprint_list(self.bucket_name) if self.knowledge_accessor else []
 
@@ -134,9 +184,9 @@ class InboundTaskWorkflow(WorkflowBase):
                 for bp in blueprints
             )
 
-        prompt = MATCH_PROMPT.format(
+        prompt = MATCH_SINGLE_PROMPT.format(
             inbound_query=self.inbound_query,
-            knowledge_text=self.knowledge_text,
+            knowledge_text=self.knowledge_text[:2000],
             existing_blueprints=bp_descriptions
         )
 
@@ -147,8 +197,69 @@ class InboundTaskWorkflow(WorkflowBase):
         except json.JSONDecodeError:
             result = await self.execute_subflow(JsonFixWorkflow, raw)
 
-        self.append_log(f"Matched {len(result.get('blueprint_names', []))} blueprints, need to generate {len(result.get('generate_queries', []))}")
-        return result
+        if "blueprint_name" in result:
+            name = result["blueprint_name"]
+            self.append_log(f"Matched existing blueprint: {name}")
+            bp = next((b for b in blueprints if b.name == name), None)
+            if bp:
+                return [bp]
+            self.append_log(f"Blueprint '{name}' not found, falling through to generate")
+
+        if "generate_query" in result:
+            self.append_log(f"Generating blueprint: {result['generate_query'][:100]}...")
+            generated = await self._generate_blueprints([result["generate_query"]])
+            return generated
+
+        self.append_log("No blueprint matched or generated")
+        return []
+
+    async def _match_multiple(self) -> list[Blueprint]:
+        """
+        Match or generate MULTIPLE blueprints for multi-entity extraction.
+        Returns: list of Blueprints
+        """
+        self.append_log("Matching multiple blueprints")
+
+        blueprints = await self.knowledge_accessor.get_blueprint_list(self.bucket_name) if self.knowledge_accessor else []
+
+        if not blueprints:
+            bp_descriptions = "No existing blueprints"
+        else:
+            bp_descriptions = "\n".join(
+                f"- {bp.name}: {bp.description} (attributes: {', '.join(bp.attributes.keys())})"
+                for bp in blueprints
+            )
+
+        prompt = MATCH_MULTIPLE_PROMPT.format(
+            inbound_query=self.inbound_query,
+            knowledge_text=self.knowledge_text[:2000],
+            existing_blueprints=bp_descriptions
+        )
+
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            result = await self.execute_subflow(JsonFixWorkflow, raw)
+
+        all_blueprints = []
+
+        if result.get('blueprint_names'):
+            self.append_log(f"Matched: {', '.join(result['blueprint_names'])}")
+            for name in result['blueprint_names']:
+                bp = next((b for b in blueprints if b.name == name), None)
+                if bp:
+                    all_blueprints.append(bp)
+
+        if result.get('generate_queries'):
+            self.append_log(f"Generating {len(result['generate_queries'])} new blueprints")
+            for q in result['generate_queries']:
+                self.append_log(f"  Generate: {q[:100]}...")
+            generated = await self._generate_blueprints(result['generate_queries'])
+            all_blueprints.extend(generated)
+
+        return all_blueprints
 
     async def _generate_blueprints(self, generate_queries: list[str]) -> list[Blueprint]:
         """
@@ -196,13 +307,15 @@ class InboundTaskWorkflow(WorkflowBase):
             except json.JSONDecodeError:
                 queries = await self.execute_subflow(JsonFixWorkflow, raw)
 
+            self.append_log(f"Created {len(queries)} tasks for blueprint: {blueprint.name}")
+            for i, q in enumerate(queries, 1):
+                self.append_log(f"  Task {i}: {q}")
+
             for query in queries:
                 task = {
                     "enriched_query": query,
                     "blueprint": blueprint
                 }
                 all_tasks.append(task)
-
-            self.append_log(f"Created {len(queries)} tasks for blueprint: {blueprint.name}")
 
         return all_tasks

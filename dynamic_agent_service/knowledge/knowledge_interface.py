@@ -12,19 +12,23 @@ from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
 class KnowledgeInterface:
 
     @classmethod
-    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str):
+    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str, workflow_log_path=None):
         """
         Inbound entry point after file textification.
         Runs blueprint matching → filling → collision → storage, all scoped to bucket.
+
+        Returns: Success message with entity count
         """
         inbound_wf = await build_workflow(
             KnowledgeInboundWorkflow,
             knowledge_text,
             instruction_query,
             bucket_name,
-            knowledge_accessor=BlueprintAccessor
+            knowledge_accessor=BlueprintAccessor,
+            workflow_log_path=workflow_log_path
         )
-        return await inbound_wf.execute()
+        results = await inbound_wf.execute()
+        return f"Processed {len(results)} entities successfully"
 
     @classmethod
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10, score_threshold: float = 0.3):

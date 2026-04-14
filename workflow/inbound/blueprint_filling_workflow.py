@@ -15,6 +15,9 @@ from workflow.workflow_base import WorkflowBase
 FILL_PROMPT = """You are a RAG chunking agent.
 Your task is to extract relevant content from the source for each attribute, and organize it into readable markdown.
 
+Here is the guidance for filling:
+{guidance_section}
+
 Source Text:
 {raw_knowledge}
 
@@ -49,11 +52,13 @@ class BlueprintFillingWorkflow(WorkflowBase):
         self.attribute_schema = {}
         self.raw_knowledge = ""
         self.identifier_name = None
+        self.enriched_query = None
 
-    async def build(self, attribute_schema: dict[str, str], raw_knowledge: str, identifier_name: str):
+    async def build(self, attribute_schema: dict[str, str], raw_knowledge: str, identifier_name: str, enriched_query: str = None):
         self.attribute_schema = attribute_schema
         self.raw_knowledge = raw_knowledge
         self.identifier_name = identifier_name
+        self.enriched_query = enriched_query
         return self
 
     async def execute(self) -> dict[str, str]:
@@ -70,7 +75,12 @@ class BlueprintFillingWorkflow(WorkflowBase):
         return result
 
     async def _fill(self) -> dict[str, str]:
+        guidance_section = ""
+        if self.enriched_query:
+            guidance_section = f"{self.enriched_query}\n\n"
+
         prompt = FILL_PROMPT.format(
+            guidance_section=guidance_section,
             attribute_schema=json.dumps(self.attribute_schema, ensure_ascii=False, indent=2),
             raw_knowledge=self.raw_knowledge,
             identifier_name=self.identifier_name

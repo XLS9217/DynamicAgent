@@ -19,7 +19,7 @@ User Query: {query}
 {raw_text_section}
 Output ONLY valid JSON in this format:
 {{
-  "name": "short_snake_case_name for this blueprint type",
+  "name": "CamelCase for this blueprint type",
   "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
   "attributes": {{
     "attribute_name": {{"description": "description of what this attribute represents", "is_identifier": false}},

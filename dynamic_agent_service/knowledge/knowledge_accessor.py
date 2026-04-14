@@ -48,3 +48,45 @@ class KnowledgeAccessor(DataAccessor):
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT name, description FROM bucket")
             return [Bucket(**dict(r)) for r in rows]
+
+    @staticmethod
+    async def delete_bucket(bucket_name: str):
+        """
+        Delete a bucket and all associated data:
+        1. Delete from PostgreSQL in transaction (ACID)
+        2. Drop Milvus collection only after PG commit succeeds
+        """
+        from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
+
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                # Delete blueprint_instance rows
+                await conn.execute("""
+                    DELETE FROM blueprint_instance
+                    WHERE attribute_id IN (
+                        SELECT ba.id FROM blueprint_attribute ba
+                        JOIN blueprint b ON ba.blueprint_id = b.id
+                        WHERE b.bucket_name = $1
+                    )
+                """, bucket_name)
+
+                # Delete blueprint_attribute rows
+                await conn.execute("""
+                    DELETE FROM blueprint_attribute
+                    WHERE blueprint_id IN (
+                        SELECT id FROM blueprint WHERE bucket_name = $1
+                    )
+                """, bucket_name)
+
+                # Delete blueprint rows
+                await conn.execute("DELETE FROM blueprint WHERE bucket_name = $1", bucket_name)
+
+                # Delete bucket row
+                await conn.execute("DELETE FROM bucket WHERE name = $1", bucket_name)
+
+        # Only drop Milvus collection after PG transaction commits successfully
+        collection_name = f"bucket_{bucket_name.replace('-', '_')}"
+        client = MilvusInstance.get_client()
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)

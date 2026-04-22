@@ -18,63 +18,70 @@ DETECT_PROMPT = """Analyze the user query to determine extraction mode.
 
 User Query: {inbound_query}
 
-Does the user want to extract ONE entity or MULTIPLE entities?
+Does the user want to extract ONE type of entity or MULTIPLE types of entities?
 
 Output one word: "single" or "multiple"
 
 Examples:
-- "record THIS product" → single
-- "这个产品" → single
-- "find all products" → multiple
-- "所有的产品" → multiple
+- "record THIS product" → single (one entity type: Product)
+- "这个产品" → single (one entity type: Product)
+- "find all products and their manufacturers" → multiple (two entity types: Product, Manufacturer)
+- "extract people, companies, and locations" → multiple (three entity types)
 """
 
 
-MATCH_SINGLE_PROMPT = """Analyze the text and identify ONE entity type to extract.
+MATCH_SINGLE_PROMPT = """Analyze the user query and identify ONE entity type to extract.
 
 User Query: {inbound_query}
 
-Knowledge Text:
+Knowledge Text (preview):
 {knowledge_text}
 
 Existing Blueprints:
 {existing_blueprints}
 
-The user wants to extract ONE entity from this text.
+The user wants to extract ONE type of entity.
 
 If an existing blueprint matches, output:
 {{"blueprint_name": "Name"}}
 
 If no match, output:
-{{"generate_query": "A <Blueprint Name> blueprint, it describes <what>, it will have attributes <attr1>, <attr2>, <attr3>"}}
+{{"generate_query": "A <Blueprint Name> blueprint, it describes <what kind of entity>, it will have attributes <attr1>, <attr2>, <attr3>"}}
 
 Rules:
-- Blueprint name should be generic (e.g., "Product", "Document", "Person")
+- Blueprint name should be generic and represent a category (e.g., "Product", "Document", "Person")
 - List attributes from the user query
+- Focus on the entity TYPE, not specific instances
 """
 
 
-MATCH_MULTIPLE_PROMPT = """Analyze the text and identify all entity types to extract.
+MATCH_MULTIPLE_PROMPT = """Analyze the user query and identify all entity types to extract.
 
 User Query: {inbound_query}
 
-Knowledge Text:
+Knowledge Text (preview):
 {knowledge_text}
 
 Existing Blueprints:
 {existing_blueprints}
 
-The user wants to extract MULTIPLE entities from this text.
+The user wants to extract MULTIPLE types of entities.
+
+For each entity type:
+- If it matches an existing blueprint, add to "blueprint_names"
+- If no match, add to "generate_queries"
 
 Output as JSON:
 {{
   "blueprint_names": ["Name1", "Name2", ...],
-  "generate_queries": ["A blueprint for...", ...]
+  "generate_queries": ["A <Blueprint Name> blueprint, it describes <what>, it will have attributes <attr1>, <attr2>", ...]
 }}
 
 Rules:
-- Return all relevant entity types
-- Blueprint names should be generic
+- Only return entity TYPES, not instances
+- Blueprint names should be generic categories (e.g., "Product", "Person", "Company")
+- Do NOT return both blueprint_names and generate_queries for the same entity type
+- If no existing blueprints match, only use generate_queries
 - List attributes from the user query
 """
 

@@ -11,3 +11,4 @@ rule:
 1. do not do error catch unless I told you to
 2. simplify implementation
 3. service and client should separate, NEVER import from each other
+4. run tests with `uv run -m tests.xxx`

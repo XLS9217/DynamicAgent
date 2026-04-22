@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
 from dynamic_agent_service.service.service_structs import CreateSessionRequest
+from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
@@ -80,3 +81,35 @@ async def echo(websocket: WebSocket):
     while True:
         data = await websocket.receive_text()
         await websocket.send_text(data)
+
+
+class KnowledgeInboundRequest(BaseModel):
+    instruction_query: str
+    knowledge_text: str
+    bucket_name: str
+
+@router.post("/knowledge/inbound")
+async def knowledge_inbound(body: KnowledgeInboundRequest):
+    result = await KnowledgeInterface.inbound(
+        instruction_query=body.instruction_query,
+        knowledge_text=body.knowledge_text,
+        bucket_name=body.bucket_name
+    )
+    return {"status": "ok", "message": result}
+
+
+class KnowledgeRetrieveRequest(BaseModel):
+    query: str
+    bucket_name: str
+    top_k: int = 10
+    score_threshold: float = 0.3
+
+@router.post("/knowledge/retrieve")
+async def knowledge_retrieve(body: KnowledgeRetrieveRequest):
+    results = await KnowledgeInterface.retrieve(
+        query=body.query,
+        bucket_name=body.bucket_name,
+        top_k=body.top_k,
+        score_threshold=body.score_threshold
+    )
+    return {"status": "ok", "results": results}

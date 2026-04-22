@@ -9,6 +9,7 @@ from dynamic_agent_service.util.setup_logging import my_logger_setup, get_my_log
 my_logger_setup()
 
 from dynamic_agent_service.service.service_router import router as session_router
+from dynamic_agent_service.service.monitor_router import router as monitor_router
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(session_router)
+app.include_router(monitor_router)
 
 @app.get("/health")
 async def health_check():

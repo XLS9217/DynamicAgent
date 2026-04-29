@@ -10,5 +10,10 @@ Two packages live here:
 rule:
 1. do not do error catch unless I told you to
 2. simplify implementation
-3. service and client should separate, NEVER import from each other
-4. run tests with `uv run -m tests.xxx`
+3. service and client should separate, NEVER import from each other, unless I told you to
+
+To implement a new feature in service
+1. implement the feature
+2. write simple tests in DynamicAgent\tests, make sure to load .env 
+3. run with `uv run -m tests.xxx`
+4. check the cache folder, the path can be found in .env

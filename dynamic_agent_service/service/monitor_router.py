@@ -54,3 +54,17 @@ async def list_blueprints(bucket_name: str):
             for bp in blueprints
         ]
     }
+
+
+@router.get("/blueprints/{blueprint_id}/instances")
+async def list_instances_by_blueprint(blueprint_id: str):
+    blueprint = await BlueprintAccessor.get_blueprint(blueprint_id)
+    if blueprint is None:
+        raise HTTPException(status_code=404, detail="Blueprint not found")
+
+    instances = await BlueprintAccessor.get_instances_by_blueprint(blueprint_id)
+    return {
+        "status": "ok",
+        "blueprint_id": blueprint_id,
+        "instances": instances
+    }

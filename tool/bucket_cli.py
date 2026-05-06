@@ -2,7 +2,7 @@
 Interactive CLI for managing buckets: list and delete.
 """
 import asyncio
-from dynamic_agent_service.knowledge.bucket_accessor import KnowledgeAccessor
+from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 

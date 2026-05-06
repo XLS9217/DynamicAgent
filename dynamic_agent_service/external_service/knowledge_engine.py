@@ -7,8 +7,11 @@ class KnowledgeEngine:
     _dimension: int | None = None
 
     @classmethod
-    def initialize(cls):
+    async def initialize(cls):
         cls._base_url = os.getenv("KNOWLEDGE_ENGINE_URL")
+        if cls._dimension is None:
+            embeddings = await cls.get_embeddings(["test"])
+            cls._dimension = len(embeddings[0])
 
     @classmethod
     def get_dimension(cls) -> int:

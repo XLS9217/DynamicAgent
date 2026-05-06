@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     logger.info("PgInstance initialized")
     MilvusInstance.initialize()
     logger.info("MilvusInstance initialized")
-    KnowledgeEngine.initialize()
+    await KnowledgeEngine.initialize()
     logger.info("KnowledgeEngine initialized")
 
     yield

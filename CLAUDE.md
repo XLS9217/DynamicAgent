@@ -11,6 +11,11 @@ rule:
 1. do not do error catch unless I told you to
 2. simplify implementation
 3. service and client should separate, NEVER import from each other, unless I told you to
+4. To check the server output, read the log file in the cache folder
+
+# Endpoint placement guideline
+- If a feature needs to be accessed by the client, the endpoint goes to `service_router.py`
+- If a feature is only for monitoring/admin purposes, the endpoint goes to `monitor_router.py`
 
 To implement a new feature in service
 1. implement the feature

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException
 
-from dynamic_agent_service.knowledge.bucket_accessor import KnowledgeAccessor
-from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
+from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
@@ -35,7 +34,7 @@ async def list_blueprints(bucket_name: str):
     if bucket is None:
         raise HTTPException(status_code=404, detail="Bucket not found")
 
-    blueprints = await BlueprintAccessor.get_blueprint_list(bucket_name)
+    blueprints = await KnowledgeAccessor.get_blueprint_list(bucket_name)
     return {
         "status": "ok",
         "blueprints": [
@@ -58,11 +57,11 @@ async def list_blueprints(bucket_name: str):
 
 @router.get("/blueprints/{blueprint_id}/instances")
 async def list_instances_by_blueprint(blueprint_id: str):
-    blueprint = await BlueprintAccessor.get_blueprint(blueprint_id)
+    blueprint = await KnowledgeAccessor.get_blueprint(blueprint_id)
     if blueprint is None:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    instances = await BlueprintAccessor.get_instances_by_blueprint(blueprint_id)
+    instances = await KnowledgeAccessor.get_instances_by_blueprint(blueprint_id)
     return {
         "status": "ok",
         "blueprint_id": blueprint_id,

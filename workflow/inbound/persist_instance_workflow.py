@@ -8,7 +8,7 @@ or creating new instances. Generates embeddings and stores in Milvus.
 import uuid
 from workflow.workflow_base import WorkflowBase
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
-from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
+from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 
 MERGE_PROMPT = """You are merging two versions of the same attribute for a knowledge record.
 Combine them into one coherent, deduplicated markdown text.
@@ -71,7 +71,7 @@ class PersistInstanceWorkflow(WorkflowBase):
             id_row_id = inst["attributes"].get(identifier_name)
             if not id_row_id:
                 continue
-            entities = KnowledgeNodeAccessor.get_by_ids(self.bucket_name, [id_row_id])
+            entities = KnowledgeAccessor.get_by_ids(self.bucket_name, [id_row_id])
             if entities:
                 candidates[entities[0]["value"]] = inst
 
@@ -125,14 +125,14 @@ class PersistInstanceWorkflow(WorkflowBase):
             {"id": row_id, "instance_id": instance_id, "value": value, "embedding": embedding}
             for row_id, value, embedding in zip(instance_row_ids, filled_values, embeddings)
         ]
-        KnowledgeNodeAccessor.upsert_entities(self.bucket_name, entities)
+        KnowledgeAccessor.upsert_entities(self.bucket_name, entities)
         self.append_log(f"Upserted {len(entities)} entities to Milvus")
         return instance_id
 
     async def _merge_instance(self, existing: dict, attr_name_to_id: dict[str, str]) -> str:
         instance_id = existing["instance_id"]
         existing_row_ids = list(existing["attributes"].values())
-        existing_entities = KnowledgeNodeAccessor.get_by_ids(self.bucket_name, existing_row_ids)
+        existing_entities = KnowledgeAccessor.get_by_ids(self.bucket_name, existing_row_ids)
         existing_values = {e["id"]: e["value"] for e in existing_entities}
 
         to_upsert = []
@@ -170,6 +170,6 @@ class PersistInstanceWorkflow(WorkflowBase):
                 new_idx += 1
             entities.append({"id": row_id, "instance_id": instance_id, "value": value, "embedding": embedding})
 
-        KnowledgeNodeAccessor.upsert_entities(self.bucket_name, entities)
+        KnowledgeAccessor.upsert_entities(self.bucket_name, entities)
         self.append_log(f"Merged instance {instance_id}: updated {len(entities)} entities")
         return instance_id

@@ -2,10 +2,9 @@
 Inbound task workflow for knowledge inbound (v2).
 
 Flow:
-1. Retrieve all entities from the text (extract entity instances first)
-2. Try to find matching blueprints for these entities
-3. For each blueprint, pair it with relevant entities
-4. Create fill tasks
+1. Locate entity types from the inbound query
+2. Try to find existing blueprints for each type, or create new ones
+3. For each blueprint, create one fill task that extracts all matching entities from knowledge text
 """
 import json
 
@@ -15,58 +14,27 @@ from workflow.workflow_base import WorkflowBase
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
 
 
-RETRIEVE_ENTITIES_PROMPT = """Extract all entity instances from the knowledge text based on the user query.
+LOCATE_ENTITY_TYPES_PROMPT = """Analyze the inbound query and identify what entity types the user wants to extract.
 
 User Query: {inbound_query}
 
-Knowledge Text:
-{knowledge_text}
-
-Identify and list all individual entities mentioned in the text. For each entity, provide:
-1. Entity name (identifier)
-2. Description of how it exists in the text
+Identify the entity types mentioned in the query. For each type, provide:
+1. Type name (e.g., "Product", "Exploit", "Person", "Company")
+2. Brief description of what this type represents
 
 Output as JSON list:
 [
   {{
-    "name": "entity name or identifier",
-    "description": "brief description of how this entity exists in the text"
+    "type_name": "EntityType",
+    "description": "what this type represents"
   }},
   ...
 ]
 
 Rules:
-- Extract ALL entity instances, not just types
-- Be specific about each individual entity
-- Keep descriptions simple and focused on what's in the text
-"""
-
-
-MATCH_BLUEPRINTS_PROMPT = """Based on the retrieved entities, find matching blueprints or determine which new blueprints to create.
-
-User Query: {inbound_query}
-
-Retrieved Entities:
-{entities}
-
-Existing Blueprints:
-{existing_blueprints}
-
-For each entity type found:
-- If an existing blueprint matches, add to "blueprint_names"
-- If no match, add to "generate_queries"
-
-Output as JSON:
-{{
-  "blueprint_names": ["Name1", "Name2", ...],
-  "generate_queries": ["A <Blueprint Name> blueprint, it describes <what>, it will have attributes <attr1>, <attr2>", ...]
-}}
-
-Rules:
-- Match entity types to blueprint types
-- Blueprint names should be generic categories (e.g., "Product", "Person", "Company")
-- Do NOT return both blueprint_names and generate_queries for the same entity type
-- List attributes based on what was found in the entities
+- Extract entity TYPES, not instances
+- Use singular form (e.g., "Product" not "Products")
+- Keep type names generic and reusable
 """
 
 
@@ -87,137 +55,102 @@ class InboundTaskWorkflow(WorkflowBase):
 
     async def execute(self) -> list[dict]:
         """
-        Returns: list of {"enriched_query": str, "blueprint": Blueprint, "entities": list}
+        Returns: list of {"enriched_query": str, "blueprint": Blueprint}
         """
         self.append_log("InboundTaskWorkflow started")
 
-        # Step 1: Retrieve all entities from the text
-        entities = await self._retrieve_entities()
+        # Step 1: Locate entity types from the inbound query
+        entity_types = await self._locate_entity_types()
 
-        # Step 2: Match blueprints based on retrieved entities
-        all_blueprints = await self._match_blueprints(entities)
+        # Step 2: Find or create blueprints for each entity type
+        all_blueprints = await self._find_or_create_blueprints(entity_types)
 
-        # Step 3: Create tasks by pairing blueprints with relevant entities
-        tasks = await self._create_tasks(all_blueprints, entities)
+        # Step 3: Create one fill task per blueprint
+        # Each task will extract all matching entities from knowledge text
+        tasks = self._create_tasks(all_blueprints)
 
         self.append_log(f"Workflow complete: created {len(tasks)} fill tasks")
         return tasks
 
-    async def _retrieve_entities(self) -> list[dict]:
+    async def _locate_entity_types(self) -> list[dict]:
         """
-        Retrieve all entity instances from the knowledge text.
-        Returns: list of {"name": str, "description": str}
+        Locate entity types from the inbound query.
+        Returns: list of {"type_name": str, "description": str}
         """
-        self.append_log("Retrieving entities from text")
+        self.append_log("Locating entity types from query")
 
-        prompt = RETRIEVE_ENTITIES_PROMPT.format(
-            inbound_query=self.inbound_query,
-            knowledge_text=self.knowledge_text
-        )
-
+        prompt = LOCATE_ENTITY_TYPES_PROMPT.format(inbound_query=self.inbound_query)
         raw = await self.invoke_agent([{"role": "user", "content": prompt}])
 
         try:
-            entities = json.loads(raw)
+            entity_types = json.loads(raw)
         except json.JSONDecodeError:
-            entities = await self.execute_subflow(JsonFixWorkflow, raw)
+            entity_types = await self.execute_subflow(JsonFixWorkflow, raw)
 
-        self.append_log(f"Retrieved {len(entities)} entities")
-        for i, entity in enumerate(entities, 1):
-            self.append_log(f"  Entity {i}: {entity.get('name')}")
+        self.append_log(f"Located {len(entity_types)} entity types")
+        for i, et in enumerate(entity_types, 1):
+            self.append_log(f"  Type {i}: {et.get('type_name')}")
 
-        return entities
+        return entity_types
 
-    async def _match_blueprints(self, entities: list[dict]) -> list[Blueprint]:
+    async def _find_or_create_blueprints(self, entity_types: list[dict]) -> list[Blueprint]:
         """
-        Match or generate blueprints based on retrieved entities.
+        For each entity type, try to find existing blueprint or create new one.
         Returns: list of Blueprints
         """
-        self.append_log("Matching blueprints based on entities")
+        self.append_log(f"Finding or creating blueprints for {len(entity_types)} entity types")
 
-        blueprints = await self.knowledge_accessor.get_blueprint_list(self.bucket_name) if self.knowledge_accessor else []
-
-        if not blueprints:
-            bp_descriptions = "No existing blueprints"
-        else:
-            bp_descriptions = "\n".join(
-                f"- {bp.name}: {bp.description} (attributes: {', '.join(bp.attributes.keys())})"
-                for bp in blueprints
-            )
-
-        entities_text = json.dumps(entities, ensure_ascii=False, indent=2)
-
-        prompt = MATCH_BLUEPRINTS_PROMPT.format(
-            inbound_query=self.inbound_query,
-            entities=entities_text,
-            existing_blueprints=bp_descriptions
-        )
-
-        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
-
-        try:
-            result = json.loads(raw)
-        except json.JSONDecodeError:
-            result = await self.execute_subflow(JsonFixWorkflow, raw)
-
+        existing_blueprints = await self.knowledge_accessor.get_blueprint_list(self.bucket_name) if self.knowledge_accessor else []
         all_blueprints = []
 
-        if result.get('blueprint_names'):
-            self.append_log(f"Matched: {', '.join(result['blueprint_names'])}")
-            for name in result['blueprint_names']:
-                bp = next((b for b in blueprints if b.name == name), None)
-                if bp:
-                    all_blueprints.append(bp)
+        for entity_type in entity_types:
+            type_name = entity_type.get('type_name')
+            self.append_log(f"Processing entity type: {type_name}")
 
-        if result.get('generate_queries'):
-            self.append_log(f"Generating {len(result['generate_queries'])} new blueprints")
-            for q in result['generate_queries']:
-                self.append_log(f"  Generate: {q[:100]}...")
-            generated = await self._generate_blueprints(result['generate_queries'])
-            all_blueprints.extend(generated)
+            # Try to find existing blueprint
+            matched_bp = None
+            for bp in existing_blueprints:
+                if bp.name.lower() == type_name.lower():
+                    matched_bp = bp
+                    break
+
+            if matched_bp:
+                self.append_log(f"  Found existing blueprint: {matched_bp.name}")
+                all_blueprints.append(matched_bp)
+            else:
+                # Create new blueprint
+                self.append_log(f"  Creating new blueprint for: {type_name}")
+                generate_query = f"A {type_name} blueprint, it describes {entity_type.get('description')}"
+                blueprint = await self.execute_subflow(
+                    BlueprintGenerationWorkflow,
+                    generate_query,
+                    self.bucket_name,
+                    self.knowledge_text
+                )
+                if self.knowledge_accessor:
+                    blueprint.id = await self.knowledge_accessor.create_blueprint(blueprint)
+                    self.append_log(f"  Persisted blueprint: {blueprint.name} (id={blueprint.id})")
+                all_blueprints.append(blueprint)
 
         return all_blueprints
 
-    async def _generate_blueprints(self, generate_queries: list[str]) -> list[Blueprint]:
+    def _create_tasks(self, blueprints: list[Blueprint]) -> list[dict]:
         """
-        Generate new blueprints from queries and persist them
-        Returns: list of generated Blueprint objects
+        Create one fill task per blueprint.
+        Each task will extract all matching entities from knowledge text.
+        Returns: list of {"enriched_query": str, "blueprint": Blueprint}
         """
-        generated = []
-        for query in generate_queries:
-            self.append_log(f"Generating blueprint from: {query}")
-            blueprint = await self.execute_subflow(
-                BlueprintGenerationWorkflow,
-                query,
-                self.bucket_name,
-                self.knowledge_text
-            )
-            if self.knowledge_accessor:
-                blueprint.id = await self.knowledge_accessor.create_blueprint(blueprint)
-                self.append_log(f"Persisted blueprint: {blueprint.name} (id={blueprint.id})")
-            generated.append(blueprint)
-        return generated
-
-    async def _create_tasks(self, blueprints: list[Blueprint], entities: list[dict]) -> list[dict]:
-        """
-        Create fill tasks by pairing blueprints with relevant entities.
-        Returns: list of {"enriched_query": str, "blueprint": Blueprint, "entities": list}
-        """
-        self.append_log(f"Creating tasks for {len(blueprints)} blueprints with {len(entities)} entities")
+        self.append_log(f"Creating {len(blueprints)} fill tasks")
 
         all_tasks = []
 
-        # Create one task per entity per blueprint
-        # The LLM will determine during filling which entities match which blueprint
         for blueprint in blueprints:
-            for entity in entities:
-                enriched_query = f"Extract information about {entity.get('name')}"
-                task = {
-                    "enriched_query": enriched_query,
-                    "blueprint": blueprint,
-                    "entities": [entity]
-                }
-                all_tasks.append(task)
-                self.append_log(f"  Task: {enriched_query} for blueprint {blueprint.name}")
+            enriched_query = f"Extract all {blueprint.name} instances from the knowledge text. For each instance, fill available attributes. If an attribute doesn't exist in the text, leave it unfilled."
+            task = {
+                "enriched_query": enriched_query,
+                "blueprint": blueprint
+            }
+            all_tasks.append(task)
+            self.append_log(f"  Task: Extract {blueprint.name} instances")
 
         return all_tasks

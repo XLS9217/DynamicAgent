@@ -2,14 +2,14 @@
 End-to-end workflow for ingesting knowledge text into the knowledge base (v2).
 
 Orchestrates the inbound pipeline:
-1. Use InboundTaskWorkflow to retrieve entities and match blueprints
+1. Use InboundTaskWorkflow to locate entity types and find/create blueprints
 2. Process tasks in parallel via asyncio.gather
-3. For each task: fill blueprint using retrieved entities and persist via PersistInstanceWorkflow
+3. For each task: extract ALL matching instances from knowledge text and persist each via PersistInstanceWorkflow
 """
 
 import asyncio
 from workflow.inbound_v2.inbound_task_workflow import InboundTaskWorkflow
-from workflow.inbound_v2.blueprint_filling_workflow import BlueprintFillingWorkflow
+from workflow.inbound_v2.blueprint_multi_filling_workflow import BlueprintMultiFillingWorkflow
 from workflow.inbound_v2.persist_instance_workflow import PersistInstanceWorkflow
 from workflow.workflow_base import WorkflowBase
 
@@ -52,37 +52,41 @@ class KnowledgeInboundWorkflow(WorkflowBase):
         return list(results)
 
     async def _process_task(self, task: dict) -> dict:
-        """Process a single task: fill blueprint and persist"""
+        """Process a single task: extract all matching instances and persist each"""
         blueprint = task["blueprint"]
         enriched_query = task["enriched_query"]
 
         self.append_log(f"Processing task: {enriched_query}")
 
-        # Fill blueprint
+        # Extract all matching instances from knowledge text
         identifier_name = next(k for k, v in blueprint.attributes.items() if v.is_identifier)
-        filled_blueprint = await self.execute_subflow(
-            BlueprintFillingWorkflow,
+        instances = await self.execute_subflow(
+            BlueprintMultiFillingWorkflow,
+            blueprint.name,
+            blueprint.description,
             {k: v.description for k, v in blueprint.attributes.items()},
             self.knowledge_text,
             identifier_name,
             enriched_query
         )
-        self.append_log(f"Filled {len(filled_blueprint)} attributes for {enriched_query}")
+        self.append_log(f"Extracted {len(instances)} instances for {blueprint.name}")
 
-        # Persist
-        persist_result = None
+        # Persist each instance
+        persist_results = []
         if self.knowledge_accessor and blueprint.id:
-            persist_result = await self.execute_subflow(
-                PersistInstanceWorkflow,
-                blueprint,
-                filled_blueprint,
-                self.bucket_name,
-                self.knowledge_accessor
-            )
+            for instance in instances:
+                persist_result = await self.execute_subflow(
+                    PersistInstanceWorkflow,
+                    blueprint,
+                    instance,
+                    self.bucket_name,
+                    self.knowledge_accessor
+                )
+                persist_results.append(persist_result)
 
         return {
             "query": enriched_query,
             "blueprint": blueprint.model_dump(),
-            "attribute_values": filled_blueprint,
-            "persist_result": persist_result
+            "instances_count": len(instances),
+            "persist_results": persist_results
         }

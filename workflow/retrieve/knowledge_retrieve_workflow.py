@@ -9,8 +9,7 @@ Flow:
 """
 from workflow.workflow_base import WorkflowBase
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
-from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
-from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
+from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 
 DECIDE_PROMPT = """Analyze this search query and decide which similarity method should be prioritized:
 
@@ -93,7 +92,7 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
             f"Searching Milvus for top {self.top_k} nodes in bucket {self.bucket_name} "
             f"(weights: ebd={self._embedding_weight}, bm25={self._bm25_weight})"
         )
-        search_results = KnowledgeNodeAccessor.search(
+        search_results = KnowledgeAccessor.search(
             bucket_name=self.bucket_name,
             query_embedding=query_embedding,
             query_text=self.query,
@@ -210,7 +209,7 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
                 for inst in instances:
                     attr_name = row_id_to_attr.get(inst.id)
                     if attr_name == identifier_name:
-                        entities = KnowledgeNodeAccessor.get_by_ids(self.bucket_name, [inst.id])
+                        entities = KnowledgeAccessor.get_by_ids(self.bucket_name, [inst.id])
                         if entities:
                             filled_attributes[identifier_name] = entities[0]["value"]
                         break

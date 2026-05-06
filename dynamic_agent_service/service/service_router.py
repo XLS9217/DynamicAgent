@@ -83,6 +83,28 @@ async def echo(websocket: WebSocket):
         await websocket.send_text(data)
 
 
+class CreateBucketRequest(BaseModel):
+    name: str
+    description: str = ""
+
+@router.post("/knowledge/bucket")
+async def create_bucket(body: CreateBucketRequest):
+    await KnowledgeInterface.create_bucket(body.name, body.description)
+    return {"status": "ok", "bucket_name": body.name}
+
+
+@router.get("/knowledge/bucket/{bucket_name}")
+async def check_bucket(bucket_name: str):
+    exists = await KnowledgeInterface.check_bucket(bucket_name)
+    return {"status": "ok", "exists": exists}
+
+
+@router.delete("/knowledge/bucket/{bucket_name}")
+async def delete_bucket(bucket_name: str):
+    message = await KnowledgeInterface.delete_bucket(bucket_name)
+    return {"status": "ok", "message": message}
+
+
 class KnowledgeInboundRequest(BaseModel):
     instruction_query: str
     knowledge_text: str

@@ -8,8 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 from dynamic_agent_service.external_service.pg_instance import PgInstance
-from dynamic_agent_service.knowledge.blueprint_accessor import BlueprintAccessor
-from dynamic_agent_service.knowledge.knowledge_node_accessor import KnowledgeNodeAccessor
+from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 
 
 async def dump_to_cache(cache_dir: str, bucket_name: str = "test"):
@@ -18,7 +17,7 @@ async def dump_to_cache(cache_dir: str, bucket_name: str = "test"):
     bucket_dir.mkdir(parents=True, exist_ok=True)
 
     # Dump blueprints
-    blueprints = await BlueprintAccessor.get_blueprint_list(bucket_name)
+    blueprints = await KnowledgeAccessor.get_blueprint_list(bucket_name)
     bp_result = [bp.model_dump() for bp in blueprints]
 
     bp_path = bucket_dir / "knowledge_dump.json"
@@ -27,11 +26,11 @@ async def dump_to_cache(cache_dir: str, bucket_name: str = "test"):
     print(f"Dumped {len(bp_result)} blueprints to {bp_path}")
 
     # Dump instances with attribute values from Milvus
-    instances = await BlueprintAccessor.get_all_instances(bucket_name)
+    instances = await KnowledgeAccessor.get_all_instances(bucket_name)
     instance_result = []
     for inst in instances:
         row_ids = [a["row_id"] for a in inst["attributes"]]
-        entities = KnowledgeNodeAccessor.get_by_ids(bucket_name, row_ids) if row_ids else []
+        entities = KnowledgeAccessor.get_by_ids(bucket_name, row_ids) if row_ids else []
         value_map = {e["id"]: e["value"] for e in entities}
 
         obj = {
@@ -56,7 +55,7 @@ async def main():
 
     cache_dir = os.getenv("CACHE_DIR", ".")
     os.makedirs(cache_dir, exist_ok=True)
-    await dump_to_cache(cache_dir)
+    await dump_to_cache(cache_dir, bucket_name="claude_mythos_blog")
 
     await PgInstance.close()
 

@@ -17,3 +17,5 @@ To implement a new feature in service
 2. write simple tests in DynamicAgent\tests, make sure to load .env 
 3. run with `uv run -m tests.xxx`
 4. check the cache folder, the path can be found in .env
+5. if it relates to the change If the client's experience is affected, 
+   - please update, create, or request the deletion of scripts within DynamicAgent\examples accordingly. 

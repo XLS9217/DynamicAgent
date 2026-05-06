@@ -11,9 +11,7 @@ class CreateSessionRequest(BaseModel):
     reconnect_keep: int = 30
     # Agent
     messages: list = []
-    compact_limit: int = None
-    compact_target: int = None
-    bucket_name: str = None
+    bucket_name: Optional[str] = None
 
 
 class AgentResponseChunk(BaseModel):
@@ -25,7 +23,6 @@ class AgentResponseChunk(BaseModel):
     tool_call: Optional[AgentToolCall] = None
     finished: bool = False
     invoked: bool = False
-    compacting: Optional[bool] = None # Three state None True False
 
 class ToolExecuteResult(BaseModel):
     type: Literal["tool_execute_result"]

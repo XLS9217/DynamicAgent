@@ -1,0 +1,148 @@
+"""
+Create a reusable blueprint schema from a user query and optional reference text.
+
+Generates a blueprint with name, description, and attributes (each with description and
+is_identifier flag). The description must be general and reusable, not instance-specific.
+Includes validation and refinement loop (max 2 retries) to ensure quality: checks for
+proper naming conventions, exactly one identifier attribute, and sufficient coverage of
+the query requirements.
+"""
+import json
+
+from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
+from workflow.utility.json_fix_workflow import JsonFixWorkflow
+from workflow.workflow_base import WorkflowBase
+
+GENERATE_PROMPT = """Based on this user query, generate a reusable blueprint schema:
+
+User Query: {query}
+{raw_text_section}
+Output ONLY valid JSON in this format:
+{{
+  "name": "CamelCase for this blueprint type",
+  "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
+  "attributes": {{
+    "attribute_name": {{"description": "description of what this attribute represents", "is_identifier": false}},
+    ...
+  }}
+}}
+
+Rules:
+- Description must be general and reusable, not specific to any particular instance
+- Attribute names must be in English, lowercase, using underscores
+- Keep descriptions concise
+- Set is_identifier to true for the single attribute that uniquely identifies an instance (e.g. name, title, ID). Exactly one attribute must be the identifier."""
+
+VALIDATE_PROMPT = """Review this blueprint schema for quality:
+
+User Query: {query}
+
+Blueprint:
+{blueprint}
+
+Check:
+1. Is the description general and reusable (not specific to any instance)?
+2. Are attribute names in English, lowercase, with underscores?
+3. Are attributes relevant and sufficient for the query?
+4. Are attribute descriptions clear and concise?
+5. Is there exactly one attribute with is_identifier set to true?
+
+If ALL checks pass, respond with ONLY: YES
+If ANY check fails, respond with ONLY: NO
+<issues>
+- issue 1
+- issue 2
+</issues>"""
+
+REFINE_PROMPT = """Fix the following blueprint schema:
+
+Issues:
+{issues}
+
+Original blueprint:
+{blueprint}
+
+Output ONLY valid JSON in the same format."""
+
+
+class BlueprintGenerationWorkflow(WorkflowBase):
+    MAX_RETRIES = 2
+
+    def __init__(self):
+        super().__init__()
+        self.query = ""
+        self.bucket_name = ""
+        self.raw_text = None
+
+    async def build(self, query: str, bucket_name: str, raw_text: str = None):
+        self.query = query
+        self.bucket_name = bucket_name
+        self.raw_text = raw_text
+        return self
+
+    async def _generate(self) -> dict:
+        self.append_log("Start generating blueprint schema")
+        raw_text_section = ""
+        if self.raw_text:
+            raw_text_section = f"\nReference Text:\n{self.raw_text}\n"
+        prompt = GENERATE_PROMPT.format(query=self.query, raw_text_section=raw_text_section)
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
+        try:
+            result = json.loads(raw)
+            self.append_log(f"Blueprint generated with {len(result.get('attributes', {}))} attributes")
+            return result
+        except json.JSONDecodeError:
+            self.append_log("Blueprint JSON malformed, invoking JsonFixWorkflow")
+            return await self.execute_subflow(JsonFixWorkflow, raw)
+
+    async def _validate(self, blueprint: dict) -> str | None:
+        """Returns None if valid, issues string if not"""
+        self.append_log("Validating blueprint quality")
+
+        # Check identifier count first
+        identifier_count = sum(1 for attr in blueprint.get("attributes", {}).values() if attr.get("is_identifier", False))
+        if identifier_count != 1:
+            return f"NO\n<issues>\n- Blueprint has {identifier_count} identifier attributes, must have exactly 1\n</issues>"
+
+        prompt = VALIDATE_PROMPT.format(
+            query=self.query,
+            blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
+        )
+        result = await self.invoke_agent([{"role": "user", "content": prompt}])
+        if result.strip().startswith("YES"):
+            self.append_log("Blueprint validation passed")
+            return None
+        self.append_log("Blueprint validation failed, refinement required")
+        return result
+
+    async def _refine(self, blueprint: dict, issues: str) -> dict:
+        self.append_log("Refining blueprint")
+        prompt = REFINE_PROMPT.format(
+            issues=issues,
+            blueprint=json.dumps(blueprint, ensure_ascii=False, indent=2)
+        )
+        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
+        try:
+            result = json.loads(raw)
+            self.append_log(f"Blueprint refined to {len(result.get('attributes', {}))} attributes")
+            return result
+        except json.JSONDecodeError:
+            self.append_log("Refined blueprint JSON malformed, invoking JsonFixWorkflow")
+            return await self.execute_subflow(JsonFixWorkflow, raw)
+
+    async def execute(self) -> Blueprint:
+        """
+        Orchestrator: generate -> validate -> refine (max 2 retries)
+        """
+        self.append_log("BlueprintGenerationWorkflow started")
+        blueprint = await self._generate()
+
+        for _ in range(self.MAX_RETRIES):
+            issues = await self._validate(blueprint)
+            if issues is None:
+                break
+            blueprint = await self._refine(blueprint, issues)
+
+        self.append_log("BlueprintGenerationWorkflow completed")
+        blueprint["bucket_name"] = self.bucket_name
+        return Blueprint(**blueprint)

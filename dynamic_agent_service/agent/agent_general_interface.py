@@ -50,8 +50,6 @@ class AgentGeneralInterface:
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
         self._setting = ""
         self._messages = []
-        self._compact_limit = 40
-        self._compact_target = 20
         self._stream_callback = None
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
@@ -65,8 +63,6 @@ class AgentGeneralInterface:
             language_engine: LanguageEngine,
             setting: str = "",
             messages: list = None,
-            compact_limit: int = 40,
-            compact_target: int = 20,
             tool_execute: Callable = None,
             stream_callback: Callable = None,
             session_logger = None,
@@ -75,8 +71,6 @@ class AgentGeneralInterface:
         agi = cls(language_engine)
         agi._setting = setting
         agi._messages = messages or []
-        agi._compact_limit = compact_limit
-        agi._compact_target = compact_target
         agi._stream_callback = stream_callback
         agi._operator_handler.tool_execute = tool_execute
         agi._session_logger = session_logger
@@ -170,15 +164,11 @@ class AgentGeneralInterface:
 
     async def _forge_message_list(self, user_message: str, retrieved_knowledge: list[dict] | None = None) -> list:
         """
-        1. compact messages if over limit
-        2. forge system message (with RAG result if knowledge retrieved)
-        3. append context messages
-        4. append user message
-        5. return the message list
+        1. forge system message (with RAG result if knowledge retrieved)
+        2. append context messages
+        3. append user message
+        4. return the message list
         """
-        if len(self._messages) >= self._compact_limit:
-            await self._compact_messages()
-
         operator_menu = self._operator_handler.get_menu()
 
         # Build RAG result section
@@ -201,33 +191,3 @@ class AgentGeneralInterface:
             *self._messages,
             {"role": "user", "content": user_message}
         ]
-
-    async def _compact_messages(self):
-        keep_count = self._compact_target - 1
-        old = self._messages[:-keep_count]
-        keep = self._messages[-keep_count:]
-
-        await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", compacting=True))
-
-        summary_response = await self._response_handler.invoke(
-            messages=[
-                {"role": "system", "content": "Summarize the following conversation concisely. Preserve key facts, decisions, and context."},
-                *old,
-            ],
-            tools=[],
-        )
-
-        await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", compacting=False))
-
-        self._messages = [
-            {"role": "assistant", "content": f"Here is the previous conversation:\n{summary_response.full_text}"},
-            *keep,
-        ]
-        logger.info(f"Compacted messages: {len(old)} old -> 1 summary + {len(keep)} kept")
-
-        # Log compaction event to system log
-        self._session_logger.log_system("compaction", {
-            "old_count": len(old),
-            "kept_count": len(keep),
-            "summary": summary_response.full_text
-        })

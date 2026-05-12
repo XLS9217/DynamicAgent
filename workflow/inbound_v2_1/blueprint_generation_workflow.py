@@ -4,12 +4,12 @@ Generate a blueprint schema from entity type, inbound query, and knowledge text.
 This workflow creates a reusable blueprint with:
 - One identifier attribute
 - Additional attributes as needed
-- A summary attribute (generated after reviewing the blueprint)
 
 The blueprint is general and reusable, not instance-specific.
+Note: The summary attribute is NOT part of the blueprint - it will be generated per instance after filling.
 
 Input: entity type (type_name + locate_reason), inbound query, knowledge text
-Output: Blueprint with attributes (including summary)
+Output: Blueprint with attributes (excluding summary)
 """
 import json
 
@@ -32,9 +32,15 @@ Create a blueprint with:
 1. One identifier attribute - uniquely identifies an instance (e.g., name, title, ID)
 2. Additional attributes as needed based on the entity type and knowledge text
 
+Design attributes to be information-rich rather than categorical:
+- Prefer attributes that capture detailed information over simple labels
+- Think of attributes as aspects to extract comprehensive information from the text
+- Each attribute is a "bucket" to collect all related information about that aspect
+- Avoid yes/no or single-word categorical attributes when possible
+
 Output ONLY valid JSON in this format:
 {{
-  "name": "CamelCase name for this blueprint type, one word is preferred",
+  "name": "CamelCase name for this blueprint type, single word is preferred",
   "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
   "attributes": {{
     "attribute_name": {{"description": "description of what this attribute represents", "is_identifier": true}},
@@ -45,10 +51,8 @@ Output ONLY valid JSON in this format:
 Rules:
 - Description must be general and reusable, not specific to any particular instance
 - Attribute names must be in English, lowercase, using underscores
-- Keep descriptions concise
 - Exactly one attribute must have is_identifier set to true
 - The identifier should be something that uniquely identifies instances (like name, title, id)
-- Do NOT include a "summary" attribute - it will be added later
 """
 
 VALIDATE_PROMPT = """Review this blueprint schema for quality:
@@ -112,12 +116,12 @@ class BlueprintGenerationWorkflow(WorkflowBase):
 
     async def execute(self) -> Blueprint:
         """
-        Returns: Blueprint with attributes including identifier and summary
+        Returns: Blueprint with attributes (excluding summary)
         """
         self.append_log("BlueprintGenerationWorkflow started")
         self.append_log(f"Entity type: {self.type_name}")
 
-        # Step 1: Generate blueprint without summary
+        # Generate blueprint without summary
         blueprint_dict = await self._generate_blueprint()
 
         self.append_log(f"Generated blueprint: {blueprint_dict['name']}")
@@ -126,14 +130,6 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         # Validate identifier
         # TO-DO: decide whether we need this or not
         # self._validate_identifier(blueprint_dict)
-
-        # Step 2: Generate summary attribute by reviewing the blueprint
-        summary_description = await self._generate_summary_desc(blueprint_dict)
-        blueprint_dict['attributes']['summary'] = {
-            "description": summary_description,
-            "is_identifier": False
-        }
-        self.append_log(f"  Added summary attribute")
 
         # Add bucket_name to blueprint_dict
         blueprint_dict['bucket_name'] = self.bucket_name

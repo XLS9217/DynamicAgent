@@ -51,6 +51,30 @@ Rules:
 - Focus on information specifically about "{entity_name}", not other entities
 """
 
+GENERATE_SUMMARY_PROMPT = """You are generating a summary for a specific instance.
+
+Blueprint: {blueprint_name}
+
+Filled Attributes:
+{filled_attributes_json}
+
+Generate a concise summary (2-3 sentences) that captures the key information about this specific instance.
+
+The summary should:
+- Provide a quick overview of what this instance is
+- Highlight the most important or distinctive attributes
+- Be specific to this instance, not generic
+
+Output ONLY the summary text (not JSON, just the text).
+
+Rules:
+- Keep it concise (2-3 sentences maximum)
+- Focus on the most important information
+- Make it specific to this instance
+- Use clear, readable language
+- ONLY use information from the filled attributes above
+"""
+
 
 class FillBlueprintWorkflow(WorkflowBase):
     def __init__(self):
@@ -69,12 +93,13 @@ class FillBlueprintWorkflow(WorkflowBase):
 
     async def execute(self) -> dict[str, str]:
         """
-        Returns: dict of filled attribute values {attribute_name: value}
+        Returns: dict of filled attribute values {attribute_name: value} including summary
         """
         self.append_log("FillBlueprintWorkflow started")
         self.append_log(f"Blueprint: {self.blueprint.name}")
         self.append_log(f"Entity: {self.entity_name}")
 
+        # Step 1: Fill all blueprint attributes
         filled_attributes = await self._fill_attributes()
 
         # Validate identifier is present
@@ -90,6 +115,12 @@ class FillBlueprintWorkflow(WorkflowBase):
         filled_attributes = {k: v for k, v in filled_attributes.items() if v is not None}
 
         self.append_log(f"Filled {len(filled_attributes)} attributes")
+
+        # Step 2: Generate summary by reviewing filled attributes
+        summary = await self._generate_summary(filled_attributes)
+        filled_attributes['summary'] = summary
+        self.append_log(f"Generated summary")
+
         self.append_log("FillBlueprintWorkflow completed")
         return filled_attributes
 
@@ -129,3 +160,18 @@ class FillBlueprintWorkflow(WorkflowBase):
             filled_attributes = await self.execute_subflow(JsonFixWorkflow, raw)
 
         return filled_attributes
+
+    async def _generate_summary(self, filled_attributes: dict[str, str]) -> str:
+        """
+        Generate summary by reviewing all filled attributes.
+        Returns: summary string
+        """
+        self.append_log("Generating summary by reviewing filled attributes")
+
+        prompt = GENERATE_SUMMARY_PROMPT.format(
+            blueprint_name=self.blueprint.name,
+            filled_attributes_json=json.dumps(filled_attributes, ensure_ascii=False, indent=2)
+        )
+
+        summary = await self.invoke_agent([{"role": "user", "content": prompt}])
+        return summary.strip()

@@ -47,10 +47,6 @@ Output ONLY valid JSON list:
 Rules:
 - Only include entities where the text provides enough information to fill at least 2-3 attributes from the blueprint (beyond just the identifier)
 - entity_name should be meaningful and human-readable
-  - For products: use the actual product name (e.g., "FreeBSD", "Firefox", "OpenBSD")
-  - For exploits: create a descriptive name based on what it does (e.g., "FreeBSD NFS RCE", "Firefox JIT Heap Spray")
-  - Avoid using technical IDs like SHA-3 hashes or long cryptographic strings as names
-  - If a CVE ID exists, you may use it (e.g., "CVE-2026-4747")
 - entity_desc should briefly describe this specific entity, not the type in general
 - If no entities are found, return an empty list []
 - Keep entity_desc concise (1-2 sentences)

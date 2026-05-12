@@ -43,9 +43,8 @@ Output ONLY valid JSON:
 Rules:
 - Fill ALL attributes listed above
 - Use the original text as much as possible — do not invent information
-- You may add markdown formatting (headings, bullet points, bold) to improve readability
-- Keep the original language of the source text
-- Each value should be independently understandable
+- Reorganize the original text use simple markdown
+- Do NOT use Python list syntax like ['item'] — use plain text or markdown bullets
 - If the source text has no relevant content for an attribute, set its value to null
 - The identifier attribute "{identifier_name}" MUST have a value (use the entity_name)
 - Focus on information specifically about "{entity_name}", not other entities

@@ -18,15 +18,7 @@ from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 
-GENERATE_BLUEPRINT_PROMPT = """Generate a reusable blueprint schema for the entity type.
-
-Entity Type: {type_name}
-Locate Reason: {locate_reason}
-
-Inbound Query: {inbound_query}
-
-Knowledge Text (for reference):
-{knowledge_text}
+GENERATE_BLUEPRINT_PROMPT_SYS = """You generate reusable blueprint schemas for entity types.
 
 Create a blueprint with:
 1. One identifier attribute - uniquely identifies an instance (e.g., name, title, ID)
@@ -34,6 +26,7 @@ Create a blueprint with:
 
 Design attributes to be information-rich rather than categorical:
 - Prefer attributes that capture detailed information over simple labels
+- Attribute names should be in English, lowercase, using underscores, generic across entities of same type
 - Think of attributes as aspects to extract comprehensive information from the text
 - Each attribute is a "bucket" to collect all related information about that aspect
 - Avoid yes/no or single-word categorical attributes when possible
@@ -54,6 +47,14 @@ Rules:
 - Exactly one attribute must have is_identifier set to true
 - The identifier should be something that uniquely identifies instances (like name, title, id)
 """
+
+GENERATE_BLUEPRINT_PROMPT_USER = """Entity Type: {type_name}
+Locate Reason: {locate_reason}
+
+Inbound Query: {inbound_query}
+
+Knowledge Text (for reference):
+{knowledge_text}"""
 
 VALIDATE_PROMPT = """Review this blueprint schema for quality:
 
@@ -142,13 +143,16 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         Use LLM to generate blueprint schema.
         Returns: dict with name, description, attributes
         """
-        prompt = GENERATE_BLUEPRINT_PROMPT.format(
+        user_prompt = GENERATE_BLUEPRINT_PROMPT_USER.format(
             type_name=self.type_name,
             locate_reason=self.locate_reason,
             inbound_query=self.inbound_query,
             knowledge_text=self.knowledge_text
         )
-        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
+        raw = await self.invoke_agent([
+            {"role": "system", "content": GENERATE_BLUEPRINT_PROMPT_SYS},
+            {"role": "user", "content": user_prompt}
+        ])
 
         try:
             blueprint_dict = json.loads(raw)

@@ -17,7 +17,7 @@ class MilvusInstance:
     @classmethod
     def initialize(cls) -> None:
         if cls._client is None:
-            milvus_uri = os.getenv("MILVUS_URI", "http://localhost:19530")
+            milvus_uri = os.getenv("MILVUS_URI")
             cls._client = MilvusClient(uri=milvus_uri)
             logger.info(f"Milvus client initialized with URI: {milvus_uri}")
 

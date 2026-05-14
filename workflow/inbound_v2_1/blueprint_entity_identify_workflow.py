@@ -32,7 +32,7 @@ Knowledge Text:
 
 Identify ALL entities of type "{blueprint_name}" that exist in the knowledge text.
 For each entity, provide:
-1. entity_name: A meaningful, human-readable name for this entity
+1. entity_name: A meaningful, human-readable name for this entity, as short as possible
 2. entity_desc: A brief description of what this specific entity is (1-2 sentences)
 
 Output ONLY valid JSON list:

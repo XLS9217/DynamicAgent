@@ -39,22 +39,21 @@ class KnowledgeAccessor(DataAccessor):
                     description TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS blueprint (
-                    id          TEXT PRIMARY KEY,
-                    bucket_name TEXT NOT NULL REFERENCES bucket(name),
-                    name        TEXT NOT NULL,
-                    description TEXT NOT NULL
+                    blueprint_id TEXT PRIMARY KEY,
+                    bucket_name  TEXT NOT NULL REFERENCES bucket(name),
+                    name         TEXT NOT NULL,
+                    description  TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS blueprint_attribute (
-                    id           TEXT PRIMARY KEY,
-                    blueprint_id TEXT NOT NULL REFERENCES blueprint(id),
-                    name         TEXT NOT NULL,
-                    description  TEXT NOT NULL,
+                    attribute_id  TEXT PRIMARY KEY,
+                    blueprint_id  TEXT NOT NULL REFERENCES blueprint(blueprint_id),
+                    name          TEXT NOT NULL,
+                    description   TEXT NOT NULL,
                     is_identifier BOOLEAN NOT NULL DEFAULT FALSE
                 );
                 CREATE TABLE IF NOT EXISTS blueprint_instance (
-                    id           TEXT PRIMARY KEY,
-                    instance_id  TEXT NOT NULL,
-                    attribute_id TEXT NOT NULL REFERENCES blueprint_attribute(id)
+                    instance_id  TEXT PRIMARY KEY,
+                    blueprint_id TEXT NOT NULL REFERENCES blueprint(blueprint_id)
                 );
             """)
         return True
@@ -76,8 +75,9 @@ class KnowledgeAccessor(DataAccessor):
 
         if not client.has_collection(collection_name):
             schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-            schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=64)
+            schema.add_field("kn_id", DataType.VARCHAR, is_primary=True, max_length=64)
             schema.add_field("instance_id", DataType.VARCHAR, max_length=64)
+            schema.add_field("attribute_id", DataType.VARCHAR, max_length=64)
             schema.add_field("value", DataType.VARCHAR, max_length=65535, enable_analyzer=True)
             schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
             schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dimension)
@@ -127,16 +127,14 @@ class KnowledgeAccessor(DataAccessor):
             async with conn.transaction():
                 await conn.execute("""
                     DELETE FROM blueprint_instance
-                    WHERE attribute_id IN (
-                        SELECT ba.id FROM blueprint_attribute ba
-                        JOIN blueprint b ON ba.blueprint_id = b.id
-                        WHERE b.bucket_name = $1
+                    WHERE blueprint_id IN (
+                        SELECT blueprint_id FROM blueprint WHERE bucket_name = $1
                     )
                 """, bucket_name)
                 await conn.execute("""
                     DELETE FROM blueprint_attribute
                     WHERE blueprint_id IN (
-                        SELECT id FROM blueprint WHERE bucket_name = $1
+                        SELECT blueprint_id FROM blueprint WHERE bucket_name = $1
                     )
                 """, bucket_name)
                 await conn.execute("DELETE FROM blueprint WHERE bucket_name = $1", bucket_name)
@@ -158,13 +156,13 @@ class KnowledgeAccessor(DataAccessor):
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO blueprint (id, bucket_name, name, description) VALUES ($1, $2, $3, $4)",
+                "INSERT INTO blueprint (blueprint_id, bucket_name, name, description) VALUES ($1, $2, $3, $4)",
                 bp_id, blueprint.bucket_name, blueprint.name, blueprint.description,
             )
             for attr_name, attr_schema in blueprint.attributes.items():
                 attr_id = str(uuid.uuid4())
                 await conn.execute(
-                    "INSERT INTO blueprint_attribute (id, blueprint_id, name, description, is_identifier) VALUES ($1, $2, $3, $4, $5)",
+                    "INSERT INTO blueprint_attribute (attribute_id, blueprint_id, name, description, is_identifier) VALUES ($1, $2, $3, $4, $5)",
                     attr_id, bp_id, attr_name, attr_schema.description, attr_schema.is_identifier,
                 )
         return bp_id
@@ -174,12 +172,12 @@ class KnowledgeAccessor(DataAccessor):
         """Get a blueprint by ID."""
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT bucket_name, name, description FROM blueprint WHERE id = $1", blueprint_id)
+            row = await conn.fetchrow("SELECT bucket_name, name, description FROM blueprint WHERE blueprint_id = $1", blueprint_id)
             if row is None:
                 return None
             attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
             return Blueprint(
-                id=blueprint_id,
+                blueprint_id=blueprint_id,
                 bucket_name=row["bucket_name"],
                 name=row["name"],
                 description=row["description"],
@@ -191,12 +189,12 @@ class KnowledgeAccessor(DataAccessor):
         """Get all blueprints in a bucket."""
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, bucket_name, name, description FROM blueprint WHERE bucket_name = $1", bucket_name)
+            rows = await conn.fetch("SELECT blueprint_id, bucket_name, name, description FROM blueprint WHERE bucket_name = $1", bucket_name)
             results = []
             for row in rows:
-                attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", row["id"])
+                attrs = await conn.fetch("SELECT name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", row["blueprint_id"])
                 results.append(Blueprint(
-                    id=row["id"],
+                    blueprint_id=row["blueprint_id"],
                     bucket_name=row["bucket_name"],
                     name=row["name"],
                     description=row["description"],
@@ -209,113 +207,47 @@ class KnowledgeAccessor(DataAccessor):
         """Get all attributes for a blueprint."""
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, blueprint_id, name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
+            rows = await conn.fetch("SELECT attribute_id, blueprint_id, name, description, is_identifier FROM blueprint_attribute WHERE blueprint_id = $1", blueprint_id)
             return [BlueprintAttribute(**dict(r)) for r in rows]
 
     @staticmethod
-    async def create_instance(instance_id: str, attribute_ids: list[str]) -> list[str]:
-        """Create blueprint instance rows."""
+    async def create_instance(instance_id: str, blueprint_id: str):
+        """Create a blueprint_instance row mapping instance_id to blueprint_id."""
         pool = PgInstance.get_pool()
-        ids = []
         async with pool.acquire() as conn:
-            for attr_id in attribute_ids:
-                row_id = str(uuid.uuid4())
-                await conn.execute(
-                    "INSERT INTO blueprint_instance (id, instance_id, attribute_id) VALUES ($1, $2, $3)",
-                    row_id, instance_id, attr_id,
-                )
-                ids.append(row_id)
-        return ids
+            await conn.execute(
+                "INSERT INTO blueprint_instance (instance_id, blueprint_id) VALUES ($1, $2)",
+                instance_id, blueprint_id,
+            )
 
     @staticmethod
-    async def get_instances_by_blueprint(blueprint_id: str) -> list[dict]:
-        """Get all instances for a blueprint."""
+    async def get_instances_by_blueprint(blueprint_id: str) -> list[str]:
+        """Get all instance_ids for a blueprint."""
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT instance_id FROM blueprint_instance WHERE blueprint_id = $1 ORDER BY instance_id",
+                blueprint_id,
+            )
+            return [r["instance_id"] for r in rows]
+
+    @staticmethod
+    async def get_all_instances(bucket_name: str) -> list[BlueprintInstance]:
+        """Get all instances in a bucket as (instance_id, blueprint_id) pairs."""
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
-                SELECT bi.id, bi.instance_id, ba.name as attr_name
+                SELECT bi.instance_id, bi.blueprint_id
                 FROM blueprint_instance bi
-                JOIN blueprint_attribute ba ON bi.attribute_id = ba.id
-                WHERE ba.blueprint_id = $1
-                ORDER BY bi.instance_id
-            """, blueprint_id)
-        instances = {}
-        for r in rows:
-            iid = r["instance_id"]
-            if iid not in instances:
-                instances[iid] = {"instance_id": iid, "attributes": {}}
-            instances[iid]["attributes"][r["attr_name"]] = r["id"]
-        return list(instances.values())
-
-    @staticmethod
-    async def get_instances_by_instance_id(instance_id: str) -> list[BlueprintInstance]:
-        """Get all blueprint instance rows for a given instance_id."""
-        pool = PgInstance.get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT id, instance_id, attribute_id FROM blueprint_instance WHERE instance_id = $1", instance_id)
-            return [BlueprintInstance(**dict(r)) for r in rows]
-
-    @staticmethod
-    async def get_all_instances(bucket_name: str) -> list[dict]:
-        """Get all instances in a bucket."""
-        pool = PgInstance.get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("""
-                SELECT bi.id, bi.instance_id, bi.attribute_id, ba.name as attr_name, ba.blueprint_id
-                FROM blueprint_instance bi
-                JOIN blueprint_attribute ba ON bi.attribute_id = ba.id
-                JOIN blueprint b ON ba.blueprint_id = b.id
+                JOIN blueprint b ON bi.blueprint_id = b.blueprint_id
                 WHERE b.bucket_name = $1
                 ORDER BY bi.instance_id
             """, bucket_name)
-        instances = {}
-        for r in rows:
-            iid = r["instance_id"]
-            if iid not in instances:
-                instances[iid] = {"instance_id": iid, "blueprint_id": r["blueprint_id"], "attributes": []}
-            instances[iid]["attributes"].append({
-                "row_id": r["id"],
-                "attr_name": r["attr_name"],
-            })
-        return list(instances.values())
+            return [BlueprintInstance(**dict(r)) for r in rows]
 
     # =====================================
     # Knowledge node related
     # =====================================
-
-    @classmethod
-    async def ensure_knowledge_node_tables_exist(cls, bucket_name: str) -> bool:
-        """Ensure Milvus collection exists for a bucket."""
-        collection_name = _collection_name(bucket_name)
-        dimension = KnowledgeEngine.get_dimension()
-        client = MilvusInstance.get_client()
-        if client.has_collection(collection_name):
-            return True
-
-        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
-        schema.add_field("id", DataType.VARCHAR, is_primary=True, max_length=64)
-        schema.add_field("instance_id", DataType.VARCHAR, max_length=64)
-        schema.add_field("value", DataType.VARCHAR, max_length=65535, enable_analyzer=True)
-        schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dimension)
-
-        bm25_function = Function(
-            name="bm25",
-            function_type=FunctionType.BM25,
-            input_field_names=["value"],
-            output_field_names=["sparse_vector"]
-        )
-        schema.add_function(bm25_function)
-
-        client.create_collection(collection_name, schema=schema)
-
-        index_params = client.prepare_index_params()
-        index_params.add_index("embedding", index_type="AUTOINDEX", metric_type="COSINE")
-        index_params.add_index("sparse_vector", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
-        client.create_index(collection_name, index_params)
-
-        client.load_collection(collection_name)
-        return True
 
     @staticmethod
     def upsert_entities(bucket_name: str, entities: list[dict]):
@@ -343,14 +275,14 @@ class KnowledgeAccessor(DataAccessor):
                 top_k=top_k,
                 embedding_weight=embedding_weight,
                 bm25_weight=bm25_weight,
-                output_fields=["instance_id", "value"],
+                output_fields=["kn_id", "instance_id", "value"],
             )
         else:
             return MilvusInstance.search(
                 collection_name=collection_name,
                 query_vector=query_embedding,
                 top_k=top_k,
-                output_fields=["instance_id", "value"],
+                output_fields=["kn_id", "instance_id", "value"],
             )
 
     @staticmethod
@@ -361,7 +293,7 @@ class KnowledgeAccessor(DataAccessor):
         return client.get(
             collection_name=collection_name,
             ids=ids,
-            output_fields=["instance_id", "value"],
+            output_fields=["kn_id", "instance_id", "value"],
         )
 
     @staticmethod

@@ -79,9 +79,9 @@ class InboundOrchestrator(WorkflowBase):
                     self.knowledge_text,
                     self.bucket_name
                 )
-                new_bp.id = await KnowledgeAccessor.create_blueprint(new_bp)
+                new_bp.blueprint_id = await KnowledgeAccessor.create_blueprint(new_bp)
                 blueprints.append(new_bp)
-                self.append_log(f"Created blueprint: {new_bp.name} (id={new_bp.id})")
+                self.append_log(f"Created blueprint: {new_bp.name} (id={new_bp.blueprint_id})")
 
         # Step 3: For each blueprint, identify all entity instances
         filled_instances = []

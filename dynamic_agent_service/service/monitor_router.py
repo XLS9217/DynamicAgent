@@ -39,7 +39,7 @@ async def list_blueprints(bucket_name: str):
         "status": "ok",
         "blueprints": [
             {
-                "id": bp.id,
+                "id": bp.blueprint_id,
                 "name": bp.name,
                 "description": bp.description,
                 "attributes": {

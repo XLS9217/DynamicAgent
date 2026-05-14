@@ -12,7 +12,7 @@ class BlueprintAttributeSchema(BaseModel):
 
 
 class Blueprint(BaseModel):
-    id: str | None = None
+    blueprint_id: str | None = None
     bucket_name: str
     name: str
     description: str
@@ -27,7 +27,7 @@ class Blueprint(BaseModel):
 
 
 class BlueprintAttribute(BaseModel):
-    id: str
+    attribute_id: str
     blueprint_id: str
     name: str
     description: str
@@ -35,6 +35,5 @@ class BlueprintAttribute(BaseModel):
 
 
 class BlueprintInstance(BaseModel):
-    id: str
     instance_id: str
-    attribute_id: str
+    blueprint_id: str

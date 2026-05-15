@@ -287,6 +287,19 @@ class KnowledgeAccessor(DataAccessor):
     # =====================================
 
     @staticmethod
+    def get_nodes_by_instance_id(bucket_name: str, instance_id: str) -> list[dict]:
+        """Get all knowledge nodes for a given instance_id from Milvus."""
+        collection_name = _collection_name(bucket_name)
+        client = MilvusInstance.get_client()
+        if not client.has_collection(collection_name):
+            return []
+        return client.query(
+            collection_name=collection_name,
+            filter=f'instance_id == "{instance_id}"',
+            output_fields=["kn_id", "instance_id", "attribute_id", "value"],
+        )
+
+    @staticmethod
     def upsert_entities(bucket_name: str, entities: list[dict]):
         """Upsert knowledge nodes to Milvus."""
         collection_name = _collection_name(bucket_name)

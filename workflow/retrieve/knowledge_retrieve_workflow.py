@@ -119,7 +119,7 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         # Filter by score threshold first (at node level)
         before_count = len(search_results)
         for r in search_results:
-            self.append_log(f"Node {r['id']} distance={r.get('distance', 0.0):.4f}")
+            self.append_log(f"Node {r['kn_id']} distance={r.get('distance', 0.0):.4f}")
 
         filtered_results = [r for r in search_results if r.get("distance", 0.0) >= self.score_threshold]
         filtered_count = before_count - len(filtered_results)
@@ -155,16 +155,16 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         all_instances_data = await self.knowledge_accessor.get_all_instances(self.bucket_name)
 
         for iid, group in instance_groups.items():
-            # Get blueprint_instance rows for this instance
-            instances = await self.knowledge_accessor.get_instances_by_instance_id(iid)
-            if not instances:
+            # Get all nodes for this instance from Milvus
+            nodes = self.knowledge_accessor.get_nodes_by_instance_id(self.bucket_name, iid)
+            if not nodes:
                 continue
 
             # Find blueprint_id from all_instances_data
             blueprint_id = None
             for inst_data in all_instances_data:
-                if inst_data["instance_id"] == iid:
-                    blueprint_id = inst_data["blueprint_id"]
+                if inst_data.instance_id == iid:
+                    blueprint_id = inst_data.blueprint_id
                     break
 
             if not blueprint_id:
@@ -177,13 +177,13 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
 
             attributes = await self.knowledge_accessor.get_attributes(blueprint_id)
 
-            # Map row_ids to attribute names and get descriptions
+            # Map kn_ids to attribute names
             row_id_to_attr = {}
             attr_name_to_desc = {}
-            for inst in instances:
+            for node in nodes:
                 for attr in attributes:
-                    if inst.attribute_id == attr.id:
-                        row_id_to_attr[inst.id] = attr.name
+                    if node["attribute_id"] == attr.attribute_id:
+                        row_id_to_attr[node["kn_id"]] = attr.name
                         attr_name_to_desc[attr.name] = attr.description
                         break
 
@@ -191,25 +191,25 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
             filled_attributes = {}
 
             # Initialize all attributes with description + node_id
-            for inst in instances:
-                attr_name = row_id_to_attr.get(inst.id)
+            for node in nodes:
+                attr_name = row_id_to_attr.get(node["kn_id"])
                 if attr_name:
                     description = attr_name_to_desc.get(attr_name, "")
-                    filled_attributes[attr_name] = f"This attribute is about {description}, knowledge node id <node_id>{inst.id}</node_id>"
+                    filled_attributes[attr_name] = f"This attribute is about {description}, knowledge node id <node_id>{node['kn_id']}</node_id>"
 
             # Fill in values from search results
-            for node in group["nodes"]:
-                attr_name = row_id_to_attr.get(node["id"])
+            for search_node in group["nodes"]:
+                attr_name = row_id_to_attr.get(search_node["kn_id"])
                 if attr_name:
-                    filled_attributes[attr_name] = node["value"]
+                    filled_attributes[attr_name] = search_node["value"]
 
             # Ensure identifier is always fetched
             identifier_name = next((k for k, v in blueprint.attributes.items() if v.is_identifier), None)
             if identifier_name and filled_attributes.get(identifier_name, "").startswith("This attribute"):
-                for inst in instances:
-                    attr_name = row_id_to_attr.get(inst.id)
+                for node in nodes:
+                    attr_name = row_id_to_attr.get(node["kn_id"])
                     if attr_name == identifier_name:
-                        entities = KnowledgeAccessor.get_by_ids(self.bucket_name, [inst.id])
+                        entities = KnowledgeAccessor.get_by_ids(self.bucket_name, [node["kn_id"]])
                         if entities:
                             filled_attributes[identifier_name] = entities[0]["value"]
                         break

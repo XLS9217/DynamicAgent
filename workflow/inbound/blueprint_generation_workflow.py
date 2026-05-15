@@ -30,6 +30,7 @@ Output ONLY valid JSON in this format:
 Rules:
 - Description must be general and reusable, not specific to any particular instance
 - Attribute names must be in English, lowercase, using underscores
+- Each attribute should represent a fundamentally different dimension of the entity
 - Keep descriptions concise
 - Set is_identifier to true for the single attribute that uniquely identifies an instance (e.g. name, title, ID). Exactly one attribute must be the identifier."""
 

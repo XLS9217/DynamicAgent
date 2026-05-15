@@ -61,7 +61,7 @@ async def list_instances_by_blueprint(blueprint_id: str):
     if blueprint is None:
         raise HTTPException(status_code=404, detail="Blueprint not found")
 
-    instances = await KnowledgeAccessor.get_instances_by_blueprint(blueprint_id)
+    instances = await KnowledgeAccessor.get_filled_instances_by_blueprint(blueprint_id)
     return {
         "status": "ok",
         "blueprint_id": blueprint_id,

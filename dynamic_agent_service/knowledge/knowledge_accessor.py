@@ -231,6 +231,43 @@ class KnowledgeAccessor(DataAccessor):
             )
             return [r["instance_id"] for r in rows]
 
+    @classmethod
+    async def get_filled_instances_by_blueprint(cls, blueprint_id: str) -> list[dict]:
+        """
+        Get all filled instances for a blueprint with their attribute values.
+        Returns: list of {"instance_id": str, attr_name: value, ...}
+        """
+        # Step 1: get blueprint (for bucket_name + attribute_id -> name map)
+        blueprint = await cls.get_blueprint(blueprint_id)
+        if blueprint is None:
+            return []
+        attrs = await cls.get_attributes(blueprint_id)
+        attr_id_to_name = {a.attribute_id: a.name for a in attrs}
+
+        # Step 2: get all instance_ids for this blueprint
+        instance_ids = await cls.get_instances_by_blueprint(blueprint_id)
+        if not instance_ids:
+            return []
+
+        # Step 3: query Milvus for all nodes belonging to these instances
+        collection_name = _collection_name(blueprint.bucket_name)
+        client = MilvusInstance.get_client()
+        id_list = ", ".join(f'"{iid}"' for iid in instance_ids)
+        nodes = client.query(
+            collection_name=collection_name,
+            filter=f"instance_id in [{id_list}]",
+            output_fields=["instance_id", "attribute_id", "value"],
+        )
+
+        # Step 4: assemble {instance_id: {attr_name: value, ...}}
+        instances = {iid: {"instance_id": iid} for iid in instance_ids}
+        for n in nodes:
+            iid = n["instance_id"]
+            attr_name = attr_id_to_name.get(n["attribute_id"])
+            if attr_name and iid in instances:
+                instances[iid][attr_name] = n["value"]
+        return list(instances.values())
+
     @staticmethod
     async def get_all_instances(bucket_name: str) -> list[BlueprintInstance]:
         """Get all instances in a bucket as (instance_id, blueprint_id) pairs."""

@@ -1,12 +1,7 @@
 """
 Generate a blueprint schema from entity type, inbound query, and knowledge text.
 
-This workflow creates a reusable blueprint with:
-- One identifier attribute
-- Additional attributes as needed
-
-The blueprint is general and reusable, not instance-specific.
-Note: The summary attribute is NOT part of the blueprint - it will be generated per instance after filling.
+Pipeline: generate -> validate (self-reflection) -> refine (if needed)
 
 Input: entity type (type_name + locate_reason), inbound query, knowledge text
 Output: Blueprint with attributes (excluding summary)
@@ -18,84 +13,80 @@ from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 
-GENERATE_BLUEPRINT_PROMPT_SYS = """You generate reusable blueprint schemas for entity types.
+BLUEPRINT_SYSTEM_PROMPT = """You are a designing a blueprint
 
-Create a blueprint with:
-1. One identifier attribute - uniquely identifies an instance (e.g., name, title, ID)
-2. Additional attributes as needed based on the entity type and knowledge text
+A blueprint defines a reusable schema for a category of entities.
+It has a name, description, and a set of attributes.
 
-Design attributes to be information-rich rather than categorical:
-- Prefer attributes that capture detailed information over simple labels
-- Attribute names should be in English, lowercase, using underscores, generic across entities of same type
-- Think of attributes as aspects to extract comprehensive information from the text
-- Each attribute is a "bucket" to collect all related information about that aspect
-- Avoid yes/no or single-word categorical attributes when possible
+Format rules:
+- Attribute names: English, lowercase, underscores, generic across all entities of same type.
+- Attribute names must be a single concept. Never use "or" to join two words. If they are different things, split into separate attributes. If they are similar, pick the more general word.
+- Keep content attributes to 3-9. The identifier attribute is just a short name/label and does not count.
+- Exactly one attribute must have is_identifier=true. It holds the entity's unique name.
+- Do NOT include a "summary" attribute — it is generated separately.
 
-Output ONLY valid JSON in this format:
+Content rules:
+- The blueprint must be GENERAL: every attribute should apply to ANY instance of this entity type, even from a completely different source text.
+- Each content attribute must represent a fundamentally different dimension. If two would often overlap, merge them.
+- Design attributes whose filled values would naturally require multi-sentence explanation. Avoid categorical dimensions (type, category, status, vendor) whose values would be one or two words.
+- Attribute descriptions should state what content belongs there, not how long or detailed it should be.
+"""
+
+OUTPUT_FORMAT = """
+Output format (valid JSON only):
 {{
-  "name": "CamelCase name for this blueprint type, single word is preferred",
-  "description": "A general description of what category/type this blueprint represents, applicable to any instance of this type",
+  "name": "CamelCase type name, single word preferred",
+  "description": "General description of what this type represents",
   "attributes": {{
-    "attribute_name": {{"description": "description of what this attribute represents", "is_identifier": true}},
+    "attr_name": {{"description": "what this captures in 1~2 sentence, don't give example", "is_identifier": false}},
     ...
   }}
 }}
-
-Rules:
-- Description must be general and reusable, not specific to any particular instance
-- Attribute names must be in English, lowercase, using underscores
-- Exactly one attribute must have is_identifier set to true
-- The identifier should be something that uniquely identifies instances (like name, title, id)
 """
 
-GENERATE_BLUEPRINT_PROMPT_USER = """Entity Type: {type_name}
-Locate Reason: {locate_reason}
+GENERATE_PROMPT = """Design a blueprint for this entity type.
 
+Entity Type: {type_name}
+Locate Reason: {locate_reason}
 Inbound Query: {inbound_query}
 
 Knowledge Text (for reference):
-{knowledge_text}"""
+{knowledge_text}
+""" + OUTPUT_FORMAT
 
-VALIDATE_PROMPT = """Review this blueprint schema for quality:
+VALIDATE_PROMPT = """Review this blueprint schema by self-reflecting on each attribute.
 
 Blueprint:
-{blueprint}
+{blueprint_json}
 
-Check:
-1. Is the description general and reusable (not specific to any instance)?
-2. Are attribute names in English, lowercase, with underscores?
-3. Are attribute descriptions clear and concise?
-4. Is there exactly one attribute with is_identifier set to true?
+For each attribute, ask yourself:
+1. Would this attribute make sense for ANY instance of this entity type, even from a completely different text?
+2. Is this attribute a fundamentally different dimension from the others, or does it overlap?
+3. Is the attribute name generic enough to be reused across different contexts?
+4. Does the attribute name contain "or" joining two words? If so, it must be split or simplified.
 
-If ALL checks pass, respond with ONLY: YES
-If ANY check fails, respond with ONLY: NO
+If ALL attributes pass these checks, respond with ONLY: PASS
+
+If ANY attribute fails, respond with:
+FAIL
 <issues>
-- issue 1
-- issue 2
-</issues>"""
-
-SUMMARIZE_PROMPT = """You are reviewing a blueprint schema and need to create a summary attribute.
-
-Blueprint Name: {blueprint_name}
-Blueprint Description: {blueprint_description}
-
-Existing Attributes:
-{attributes_json}
-
-Create a "summary" attribute that will be used to store a short summary of each instance of this blueprint.
-
-The summary attribute should:
-- Provide a concise overview of the instance
-- Be general enough to apply to any instance of this blueprint type
-- Help users quickly understand what the instance is about
-
-Output ONLY the description text for the summary attribute (not JSON, just the description text).
-
-Rules:
-- Keep the description concise (1-2 sentences)
-- Focus on what the summary should contain, not how to create it
-- The description should be general and applicable to any instance
+- attribute_name: reason it fails
+</issues>
 """
+
+REFINE_PROMPT = """Refine this blueprint based on the validation feedback.
+
+Current Blueprint:
+{blueprint_json}
+
+Issues found:
+{issues}
+
+Knowledge Text (for reference):
+{knowledge_text}
+
+Fix the issues by removing, merging, or renaming attributes.
+""" + OUTPUT_FORMAT
 
 
 class BlueprintGenerationWorkflow(WorkflowBase):
@@ -116,90 +107,79 @@ class BlueprintGenerationWorkflow(WorkflowBase):
         return self
 
     async def execute(self) -> Blueprint:
-        """
-        Returns: Blueprint with attributes (excluding summary)
-        """
         self.append_log("BlueprintGenerationWorkflow started")
         self.append_log(f"Entity type: {self.type_name}")
 
-        # Generate blueprint without summary
-        blueprint_dict = await self._generate_blueprint()
+        # Step 1: Generate
+        blueprint_dict = await self._generate()
+        self.append_log(f"Generated: {blueprint_dict['name']} ({len(blueprint_dict.get('attributes', {}))} attrs)")
 
-        self.append_log(f"Generated blueprint: {blueprint_dict['name']}")
-        self.append_log(f"  Attributes: {len(blueprint_dict.get('attributes', {}))}")
+        # Step 2: Validate (self-reflection)
+        passed, issues = await self._validate(blueprint_dict)
 
-        # Validate identifier
-        # TO-DO: decide whether we need this or not
-        # self._validate_identifier(blueprint_dict)
+        # Step 3: Refine if validation failed
+        if not passed:
+            self.append_log(f"Validation failed: {issues}")
+            blueprint_dict = await self._refine(blueprint_dict, issues)
+            self.append_log(f"Refined: {blueprint_dict['name']} ({len(blueprint_dict.get('attributes', {}))} attrs)")
 
-        # Add bucket_name to blueprint_dict
         blueprint_dict['bucket_name'] = self.bucket_name
-
         self.append_log("BlueprintGenerationWorkflow completed")
         return Blueprint(**blueprint_dict)
 
-    async def _generate_blueprint(self) -> dict:
-        """
-        Use LLM to generate blueprint schema.
-        Returns: dict with name, description, attributes
-        """
-        user_prompt = GENERATE_BLUEPRINT_PROMPT_USER.format(
+    async def _generate(self) -> dict:
+        user_prompt = GENERATE_PROMPT.format(
             type_name=self.type_name,
             locate_reason=self.locate_reason,
             inbound_query=self.inbound_query,
-            knowledge_text=self.knowledge_text
+            knowledge_text=self.knowledge_text,
         )
         raw = await self.invoke_agent([
-            {"role": "system", "content": GENERATE_BLUEPRINT_PROMPT_SYS},
+            {"role": "system", "content": BLUEPRINT_SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt}
         ])
-
         try:
-            blueprint_dict = json.loads(raw)
+            return json.loads(raw)
         except json.JSONDecodeError:
-            self.append_log("JSON decode failed, invoking JsonFixWorkflow")
-            blueprint_dict = await self.execute_subflow(JsonFixWorkflow, raw)
+            return await self.execute_subflow(JsonFixWorkflow, raw)
 
-        return blueprint_dict
+    def _check_rules(self, blueprint_dict: dict) -> list[str]:
+        issues = []
+        for name in blueprint_dict.get("attributes", {}):
+            parts = name.split("_")
+            if "or" in parts:
+                issues.append(f"- {name}: contains 'or' joining two words; must be split or simplified")
+        return issues
 
-    def _validate_identifier(self, blueprint_dict: dict):
-        """
-        Validate that blueprint has exactly one identifier attribute.
-        """
-        attributes = blueprint_dict.get("attributes", {})
+    async def _validate(self, blueprint_dict: dict) -> tuple[bool, str]:
+        rule_issues = self._check_rules(blueprint_dict)
+        if rule_issues:
+            return False, "\n".join(rule_issues)
 
-        # Check identifier count
-        identifier_count = sum(1 for attr in attributes.values() if attr.get("is_identifier", False))
-        if identifier_count != 1:
-            raise ValueError(f"Blueprint must have exactly 1 identifier attribute, found {identifier_count}")
+        blueprint_json = json.dumps(blueprint_dict, ensure_ascii=False, indent=2)
+        prompt = VALIDATE_PROMPT.format(blueprint_json=blueprint_json)
+        raw = await self.invoke_agent([
+            {"role": "system", "content": BLUEPRINT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ])
+        raw = raw.strip()
+        if raw.startswith("PASS"):
+            return True, ""
+        issues = raw.replace("FAIL", "").strip()
+        return False, issues
 
-        # Ensure summary is not present yet
-        if "summary" in attributes:
-            raise ValueError("Blueprint should not have a 'summary' attribute yet - it will be added after")
-
-        self.append_log(f"  Identifier: {next(k for k, v in attributes.items() if v.get('is_identifier'))}")
-
-    async def _generate_summary_desc(self, blueprint_dict: dict) -> str:
-        """
-        Generate summary attribute description by reviewing the whole blueprint.
-        Returns: summary attribute description
-        """
-        self.append_log("Generating summary attribute by reviewing blueprint")
-
-        # Format existing attributes for the prompt
-        attributes_dict = {
-            name: {
-                "description": attr["description"],
-                "is_identifier": attr.get("is_identifier", False)
-            }
-            for name, attr in blueprint_dict["attributes"].items()
-        }
-
-        prompt = SUMMARIZE_PROMPT.format(
-            blueprint_name=blueprint_dict['name'],
-            blueprint_description=blueprint_dict['description'],
-            attributes_json=json.dumps(attributes_dict, ensure_ascii=False, indent=2)
+    async def _refine(self, blueprint_dict: dict, issues: str) -> dict:
+        blueprint_json = json.dumps(blueprint_dict, ensure_ascii=False, indent=2)
+        prompt = REFINE_PROMPT.format(
+            blueprint_json=blueprint_json,
+            issues=issues,
+            knowledge_text=self.knowledge_text,
         )
-
-        summary_description = await self.invoke_agent([{"role": "user", "content": prompt}])
-        return summary_description.strip()
+        raw = await self.invoke_agent([
+            {"role": "system", "content": BLUEPRINT_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ])
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return await self.execute_subflow(JsonFixWorkflow, raw)

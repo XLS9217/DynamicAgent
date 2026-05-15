@@ -21,13 +21,24 @@ from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
 
 
-FILL_BLUEPRINT_PROMPT = """You are filling a blueprint with attribute values for a specific entity.
+FILL_SYSTEM_PROMPT = """You are a RAG chunking agent.
 
-Blueprint: {blueprint_name}
-Blueprint Description: {blueprint_description}
+Your job is to extract text from a knowledge document and distribute it into predefined attribute buckets for a specific entity.
 
-Entity Name: {entity_name}
+Rules:
+- Extract and reorganize relevant text from the source document into each attribute.
+- Preserve the original wording as much as possible. Do not invent information.
+- Each attribute value should be a meaningful text segment (use simple markdown for structure).
+- If the source has no relevant content for an attribute, set its value to null.
+- The identifier attribute MUST have a value.
+- Focus only on information about the target entity, not other entities.
+- Do NOT use Python list syntax like ['item'] — use plain text or markdown bullets.
+"""
+
+FILL_USER_PROMPT = """Entity: {entity_name}
 Entity Description: {entity_desc}
+
+Blueprint: {blueprint_name} — {blueprint_description}
 
 Attributes to fill:
 {attributes_json}
@@ -35,22 +46,11 @@ Attributes to fill:
 Knowledge Text:
 {knowledge_text}
 
-Extract and fill ALL attributes for this specific entity from the knowledge text.
-
 Output ONLY valid JSON:
 {{
-  "attribute_name": "value extracted from text",
+  "attribute_name": "extracted text chunk",
   ...
 }}
-
-Rules:
-- Fill ALL attributes listed above
-- Use the original text as much as possible — do not invent information
-- Reorganize the original text use simple markdown
-- Do NOT use Python list syntax like ['item'] — use plain text or markdown bullets
-- If the source text has no relevant content for an attribute, set its value to null
-- The identifier attribute "{identifier_name}" MUST have a value (use the entity_name)
-- Focus on information specifically about "{entity_name}", not other entities
 """
 
 GENERATE_SUMMARY_PROMPT = """You are generating a summary for a specific instance.
@@ -126,29 +126,24 @@ class FillBlueprintWorkflow(WorkflowBase):
         Use LLM to fill all blueprint attributes for the entity.
         Returns: dict of {attribute_name: value}
         """
-        # Find identifier attribute
-        identifier_name = next(
-            name for name, attr in self.blueprint.attributes.items()
-            if attr.is_identifier
-        )
-
-        # Format attributes for the prompt
         attributes_dict = {
             name: attr.description
             for name, attr in self.blueprint.attributes.items()
         }
 
-        prompt = FILL_BLUEPRINT_PROMPT.format(
+        user_prompt = FILL_USER_PROMPT.format(
             blueprint_name=self.blueprint.name,
             blueprint_description=self.blueprint.description,
             entity_name=self.entity_name,
             entity_desc=self.entity_desc,
             attributes_json=json.dumps(attributes_dict, ensure_ascii=False, indent=2),
             knowledge_text=self.knowledge_text,
-            identifier_name=identifier_name
         )
 
-        raw = await self.invoke_agent([{"role": "user", "content": prompt}])
+        raw = await self.invoke_agent([
+            {"role": "system", "content": FILL_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ])
 
         try:
             filled_attributes = json.loads(raw)

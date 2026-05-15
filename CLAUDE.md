@@ -28,3 +28,10 @@ To implement a new feature in service
 
 # Prompt Rule
 - Never give few-shots that are too specific, if you see any violation fix
+
+# Task
+- refer to TASK.md, if it's not there, create one
+- always keep this TASK.md updated with minimal general bullet points of 
+  - what are we working on
+  - what will we be working on
+  - what has been done (and ask me to delete, so I can judge if it's really done)

@@ -6,11 +6,6 @@ Chains the existing workflows to execute the full inbound pipeline:
 2. For each entity type, try to find an existing blueprint (or create one)
 3. For each blueprint, identify all entity instances in the knowledge text
 4. For each entity, fill the blueprint attributes
-
-TODO (not yet implemented):
-- Conflict detection (identifier semantic conflict search)
-- Conflict resolution
-- Persisting filled instances as knowledge nodes
 """
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 from workflow.inbound_v2_1.blueprint_entity_identify_workflow import BlueprintEntityIdentifyWorkflow
@@ -18,6 +13,7 @@ from workflow.inbound_v2_1.blueprint_generation_workflow import BlueprintGenerat
 from workflow.inbound_v2_1.blueprint_identify_workflow import BlueprintIdentifyWorkflow
 from workflow.inbound_v2_1.entity_type_identify_workflow import EntityIdentifyWorkflow
 from workflow.inbound_v2_1.fill_blueprint_workflow import FillBlueprintWorkflow
+from workflow.inbound_v2_1.persist_knowledge_workflow import PersistKnowledgeWorkflow
 from workflow.workflow_base import WorkflowBase
 
 
@@ -93,7 +89,7 @@ class InboundOrchestrator(WorkflowBase):
             )
             self.append_log(f"Blueprint {blueprint.name}: {len(entities)} entities")
 
-            # Step 4: For each entity, fill the blueprint
+            # Step 4: For each entity, fill the blueprint then persist with collision check
             for entity in entities:
                 filled_attributes = await self.execute_subflow(
                     FillBlueprintWorkflow,
@@ -102,13 +98,27 @@ class InboundOrchestrator(WorkflowBase):
                     entity['entity_desc'],
                     self.knowledge_text
                 )
+                self.append_log(f"Filled: {blueprint.name} / {entity['entity_name']}")
+
+                # Step 5: Collision detection + persist
+                persist_result = await self.execute_subflow(
+                    PersistKnowledgeWorkflow,
+                    blueprint,
+                    filled_attributes
+                )
+
                 filled_instances.append({
                     "blueprint_name": blueprint.name,
                     "entity_name": entity['entity_name'],
                     "entity_desc": entity['entity_desc'],
-                    "filled_attributes": filled_attributes
+                    "filled_attributes": filled_attributes,
+                    "persisted": persist_result["persisted"],
+                    "collision": persist_result["collision"],
                 })
-                self.append_log(f"Filled: {blueprint.name} / {entity['entity_name']}")
+                if persist_result["persisted"]:
+                    self.append_log(f"Persisted: {entity['entity_name']}")
+                else:
+                    self.append_log(f"Collision: {entity['entity_name']} - {persist_result['collision']['reason']}")
 
         self.append_log(f"InboundOrchestrator completed: {len(filled_instances)} instances")
         return filled_instances

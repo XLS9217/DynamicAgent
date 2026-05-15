@@ -12,10 +12,7 @@ Input: Blueprint, entity_name, entity_desc, knowledge_text
 Output: dict of filled attribute values {attribute_name: value}
 """
 import json
-import uuid
 
-from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
-from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
 from workflow.utility.json_fix_workflow import JsonFixWorkflow
 from workflow.workflow_base import WorkflowBase
@@ -114,10 +111,6 @@ class FillBlueprintWorkflow(WorkflowBase):
         filled_attributes['summary'] = summary
         self.append_log(f"Generated summary")
 
-        # Step 3: Persist filled instance to PostgreSQL and Milvus
-        instance_id = await self._persist(filled_attributes)
-        self.append_log(f"Persisted instance: {instance_id}")
-
         self.append_log("FillBlueprintWorkflow completed")
         return filled_attributes
 
@@ -167,41 +160,3 @@ class FillBlueprintWorkflow(WorkflowBase):
 
         summary = await self.invoke_agent([{"role": "user", "content": prompt}])
         return summary.strip()
-
-    async def _persist(self, filled_attributes: dict[str, str]) -> str:
-        """
-        Persist filled instance to PostgreSQL and Milvus.
-        Returns: instance_id
-        """
-        instance_id = str(uuid.uuid4())
-
-        # Get blueprint attributes from database
-        blueprint_attrs = await KnowledgeAccessor.get_attributes(self.blueprint.blueprint_id)
-        attr_name_to_id = {attr.name: attr.attribute_id for attr in blueprint_attrs}
-
-        # Create blueprint_instance row in PostgreSQL (instance_id -> blueprint_id)
-        await KnowledgeAccessor.create_instance(instance_id, self.blueprint.blueprint_id)
-        self.append_log(f"Created blueprint_instance row for {instance_id}")
-
-        # Prepare data for Milvus: generate embeddings for all attribute values
-        values = list(filled_attributes.values())
-        embeddings = await KnowledgeEngine.get_embeddings(values)
-
-        # Build Milvus entities with attribute_id baked in
-        entities = []
-        for i, (attr_name, value) in enumerate(filled_attributes.items()):
-            if attr_name in attr_name_to_id:
-                attr_id = attr_name_to_id[attr_name]
-                entities.append({
-                    "kn_id": str(uuid.uuid4()),
-                    "instance_id": instance_id,
-                    "attribute_id": attr_id,
-                    "value": value,
-                    "embedding": embeddings[i]
-                })
-
-        # Upsert to Milvus
-        KnowledgeAccessor.upsert_entities(self.blueprint.bucket_name, entities)
-        self.append_log(f"Upserted {len(entities)} entities to Milvus")
-
-        return instance_id

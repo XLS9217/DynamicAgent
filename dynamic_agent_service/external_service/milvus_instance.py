@@ -96,8 +96,7 @@ class MilvusInstance:
         # Flatten results structure
         flat_results = []
         for hit in results[0]:
-            item = {'id': hit['id'], 'distance': hit['distance']}
-            # Fields are nested under 'entity' in hybrid search results
+            item = {'kn_id': hit.id, 'distance': hit.distance}
             entity = hit.get('entity', {})
             for field in output_fields:
                 if field in entity:

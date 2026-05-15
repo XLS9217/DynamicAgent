@@ -25,7 +25,7 @@ class MathOperator(AgentOperator):
 
     @flow
     def triangle_normal_angle(self) -> str:
-        return "1. Use cross product to compute normal vector for each triangle\n2. Compute magnitude of each normal vector\n3. Compute dot product of the two normal vectors\n4. Divide dot product by (magnitude_a * magnitude_b) to get cosine\n5. Use arccosine to get the angle in degrees"
+        return "1. Subtract vertices to get edge vectors for each triangle\n2. Use cross product to compute normal vector for each triangle\n3. Compute magnitude of each normal vector\n4. Compute dot product of the two normal vectors\n5. Divide dot product by (magnitude_a * magnitude_b) to get cosine\n6. Use arccosine to get the angle in degrees"
 
     @agent_tool(description="Compute dot product of two vectors")
     def dot_product(self, vector_a: list[float], vector_b: list[float]) -> float:
@@ -37,6 +37,16 @@ class MathOperator(AgentOperator):
         if len(vector_a) != len(vector_b):
             raise ValueError("Vectors must be the same length for dot product")
         return sum(a * b for a, b in zip(vector_a, vector_b))
+
+    @agent_tool(description="Subtract vector_b from vector_a element-wise")
+    def subtract_vectors(self, vector_a: list[float], vector_b: list[float]) -> list[float]:
+        """
+        :param vector_a: The first vector
+        :param vector_b: The second vector
+        """
+        if len(vector_a) != len(vector_b):
+            raise ValueError("Vectors must be the same length")
+        return [a - b for a, b in zip(vector_a, vector_b)]
 
     @agent_tool(description="Compute cross product of two 3D vectors")
     def cross_product(self, vector_a: list[float], vector_b: list[float]) -> list[float]:

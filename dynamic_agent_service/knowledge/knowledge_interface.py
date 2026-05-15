@@ -6,7 +6,7 @@ act as general interface of the RAG system
 import os
 from pathlib import Path
 from datetime import datetime
-from workflow.inbound_v2.knowledge_inbound_workflow import KnowledgeInboundWorkflow
+from workflow.inbound_v2_1.inbound_orchestrator import InboundOrchestrator
 from workflow.retrieve.knowledge_retrieve_workflow import KnowledgeRetrieveWorkflow
 from workflow.workflow_base import build_workflow
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
@@ -91,11 +91,10 @@ class KnowledgeInterface:
             workflow_log_path = cls._get_bucket_log_path(bucket_name, "inbound")
 
         inbound_wf = await build_workflow(
-            KnowledgeInboundWorkflow,
-            knowledge_text,
+            InboundOrchestrator,
             instruction_query,
+            knowledge_text,
             bucket_name,
-            knowledge_accessor=KnowledgeAccessor,
             workflow_log_path=workflow_log_path
         )
         results = await inbound_wf.execute()

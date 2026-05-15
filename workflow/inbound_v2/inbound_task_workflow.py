@@ -128,8 +128,8 @@ class InboundTaskWorkflow(WorkflowBase):
                     self.knowledge_text
                 )
                 if self.knowledge_accessor:
-                    blueprint.id = await self.knowledge_accessor.create_blueprint(blueprint)
-                    self.append_log(f"  Persisted blueprint: {blueprint.name} (id={blueprint.id})")
+                    blueprint.blueprint_id = await self.knowledge_accessor.create_blueprint(blueprint)
+                    self.append_log(f"  Persisted blueprint: {blueprint.name} (id={blueprint.blueprint_id})")
                 all_blueprints.append(blueprint)
 
         return all_blueprints

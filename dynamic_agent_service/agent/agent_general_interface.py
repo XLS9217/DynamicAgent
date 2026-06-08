@@ -6,7 +6,7 @@ from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.operator import OperatorHandler
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
-from dynamic_agent_service.service.service_structs import AgentResponseChunk
+from dynamic_agent_service.service.service_structs import AgentResponseChunk, RagContext
 from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 
 logger = get_my_logger()
@@ -87,6 +87,8 @@ class AgentGeneralInterface:
                 top_k=10
             )
             logger.info(f"Retrieved {len(retrieved_knowledge)} knowledge instances")
+            if retrieved_knowledge:
+                await self._stream_callback(RagContext(type="rag_context", knowledge=retrieved_knowledge))
 
         invoke_messages = await self._forge_message_list(message.get("text", ""), retrieved_knowledge)
 

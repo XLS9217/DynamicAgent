@@ -38,11 +38,19 @@ async def main():
     def on_stream(chunk: str):
         print(chunk, end="", flush=True)
 
+    def on_rag(knowledge: list):
+        print(f"[RAG retrieved {len(knowledge)} knowledge instances]")
+        for i, instance in enumerate(knowledge, 1):
+            print(f"  --- Knowledge {i} ---")
+            for attr_name, attr_value in instance.items():
+                print(f"    {attr_name}: {attr_value}")
+
     # Ask a question about the knowledge
     print("\nQuerying: What are the key cybersecurity capabilities of Claude Mythos Preview?\n")
     await client.trigger(
         "What are the key cybersecurity capabilities of Claude Mythos Preview?",
         on_stream=on_stream,
+        on_rag=on_rag,
     )
     print("\n")
 

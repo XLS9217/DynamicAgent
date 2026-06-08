@@ -28,3 +28,10 @@ class ToolExecuteResult(BaseModel):
     type: Literal["tool_execute_result"]
     tool_call_id: str
     content: str
+
+class RagContext(BaseModel):
+    """
+    RAG-retrieved knowledge surfaced to the client before the agent responds.
+    """
+    type: Literal["rag_context"]
+    knowledge: list[dict]

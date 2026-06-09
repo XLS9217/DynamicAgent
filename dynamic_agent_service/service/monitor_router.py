@@ -1,11 +1,25 @@
 from fastapi import APIRouter, HTTPException
 
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
+from dynamic_agent_service.service.session_management import RealtimeSessionManager
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
 
 router = APIRouter()
+
+
+@router.get("/session/{session_id}/rag")
+async def get_session_rag(session_id: str):
+    """Fetch the last RAG-retrieved knowledge for a session (monitoring)."""
+    session = RealtimeSessionManager.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    rag = await session.get_rag()
+    if rag is None:
+        return {"status": "ok", "rag": None}
+    return {"status": "ok", "rag": rag.model_dump()}
 
 
 @router.get("/buckets")

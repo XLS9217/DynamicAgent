@@ -6,9 +6,10 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
-from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest
+from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest, MessageItem, RagCache
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_logger import SessionLogger
+from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 logger = get_my_logger()
 
@@ -23,10 +24,9 @@ class RealtimeSession:
             cls._http = httpx.AsyncClient(mounts={"http://": None})
         return cls._http
 
-    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, messages: list = None, bucket_name: str = None):
+    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, bucket_name: str = None):
         self.session_id = str(uuid.uuid4())
         self.setting = setting
-        self.messages = messages or []
         self.webhook_url = webhook_url
         self.reconnect_keep = reconnect_keep
         self.bucket_name = bucket_name
@@ -34,6 +34,33 @@ class RealtimeSession:
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
         self.session_logger = SessionLogger(self.session_id)
+
+    # ===== Redis-backed session state (keys owned here, not in RedisInstance) =====
+
+    def _messages_key(self) -> str:
+        return f"session:{self.session_id}:messages"
+
+    def _rag_key(self) -> str:
+        return f"session:{self.session_id}:rag"
+
+    async def append_message(self, role: str, content: str) -> None:
+        client = RedisInstance.get_client()
+        item = MessageItem(role=role, content=content)
+        await client.rpush(self._messages_key(), item.model_dump_json())
+
+    async def load_messages(self) -> list[dict]:
+        client = RedisInstance.get_client()
+        raw_list = await client.lrange(self._messages_key(), 0, -1)
+        return [MessageItem.model_validate_json(raw).model_dump() for raw in raw_list]
+
+    async def set_rag(self, rag: RagCache) -> None:
+        client = RedisInstance.get_client()
+        await client.set(self._rag_key(), rag.model_dump_json())
+
+    async def get_rag(self) -> RagCache | None:
+        client = RedisInstance.get_client()
+        raw = await client.get(self._rag_key())
+        return RagCache.model_validate_json(raw) if raw else None
 
     async def agent_setup(self):
 
@@ -52,7 +79,6 @@ class RealtimeSession:
         self.agi = await AgentGeneralInterface.create(
             language_engine=None,
             setting=self.setting,
-            messages=self.messages,
             tool_execute=tool_execute,
             session_logger=self.session_logger,
             bucket_name=self.bucket_name,
@@ -108,7 +134,21 @@ class RealtimeSession:
         """Background task to process trigger and stream response."""
         try:
             message = {"type": "invoke", "text": text}
-            await self.agi.trigger(message)
+
+            # Fetch history from Redis (the only copy) before this turn's message
+            history = await self.load_messages()
+
+            # Trigger agent with history; AGI is stateless about history
+            assistant_text, retrieved_knowledge = await self.agi.trigger(message, history=history)
+
+            # Persist this turn to Redis
+            await self.append_message("user", text)
+            if assistant_text:
+                await self.append_message("assistant", assistant_text)
+
+            # Cache RAG retrieval for monitor access (fetched by session_id)
+            if retrieved_knowledge:
+                await self.set_rag(RagCache(query=text, knowledge=retrieved_knowledge, retrieved_at=time.time()))
 
             # Send final chunk
             final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True, invoked=True)
@@ -124,14 +164,16 @@ class RealtimeSessionManager:
     _cleanup_task: asyncio.Task | None = None
 
     @classmethod
-    def create(cls, request: CreateSessionRequest, webhook_url: str) -> RealtimeSession:
+    async def create(cls, request: CreateSessionRequest, webhook_url: str) -> RealtimeSession:
         session = RealtimeSession(
             setting=request.setting,
             webhook_url=webhook_url,
             reconnect_keep=request.reconnect_keep,
-            messages=request.messages,
             bucket_name=request.bucket_name,
         )
+        # Initial history (if any) is seeded into Redis — the only copy of messages
+        for msg in request.messages:
+            await session.append_message(msg["role"], msg["content"])
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()
         return session

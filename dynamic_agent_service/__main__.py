@@ -16,6 +16,7 @@ from dynamic_agent_service.service.monitor_router import router as monitor_route
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
+from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 
 logger = get_my_logger()
@@ -30,12 +31,15 @@ async def lifespan(app: FastAPI):
     logger.info("MilvusInstance initialized")
     await KnowledgeEngine.initialize()
     logger.info("KnowledgeEngine initialized")
+    await RedisInstance.initialize()
+    logger.info("RedisInstance initialized")
 
     yield
 
     # Shutdown
     logger.info("Closing external services...")
     await PgInstance.close()
+    await RedisInstance.close()
     logger.info("Services closed")
 
 app = FastAPI(lifespan=lifespan)

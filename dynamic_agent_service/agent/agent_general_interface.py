@@ -6,7 +6,7 @@ from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.operator import OperatorHandler
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
-from dynamic_agent_service.service.service_structs import AgentResponseChunk, RagContext
+from dynamic_agent_service.service.service_structs import AgentResponseChunk
 from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 
 logger = get_my_logger()
@@ -45,7 +45,6 @@ class AgentGeneralInterface:
 
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
         self._setting = ""
-        self._messages = []
         self._stream_callback = None
         self._response_handler = AgentResponseHandler(self.llm_engine)
 
@@ -58,7 +57,6 @@ class AgentGeneralInterface:
             cls,
             language_engine: LanguageEngine,
             setting: str = "",
-            messages: list = None,
             tool_execute: Callable = None,
             stream_callback: Callable = None,
             session_logger = None,
@@ -66,7 +64,6 @@ class AgentGeneralInterface:
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
-        agi._messages = messages or []
         agi._stream_callback = stream_callback
         agi._operator_handler.tool_execute = tool_execute
         agi._session_logger = session_logger
@@ -76,6 +73,7 @@ class AgentGeneralInterface:
     async def trigger(
         self,
         message: dict,
+        history: list = None,
     ) -> str:
         # RAG: Retrieve knowledge before answering
         retrieved_knowledge = None
@@ -87,10 +85,8 @@ class AgentGeneralInterface:
                 top_k=10
             )
             logger.info(f"Retrieved {len(retrieved_knowledge)} knowledge instances")
-            if retrieved_knowledge:
-                await self._stream_callback(RagContext(type="rag_context", knowledge=retrieved_knowledge))
 
-        invoke_messages = await self._forge_message_list(message.get("text", ""), retrieved_knowledge)
+        invoke_messages = await self._forge_message_list(message.get("text", ""), retrieved_knowledge, history)
 
         full_assistant_text = ""
 
@@ -150,17 +146,12 @@ class AgentGeneralInterface:
                 for msg in execution_messages:
                     self._session_logger.invoke_log({"type": "tool_execution", **msg})
 
-        # persist user and assistant messages for future triggers
-        self._messages.append({"role": "user", "content": message.get("text", "")})
-        if full_assistant_text:
-            self._messages.append({"role": "assistant", "content": full_assistant_text})
-
-        return full_assistant_text
+        return full_assistant_text, retrieved_knowledge
 
     def register_operator(self, operator_data: dict):
         self._operator_handler.register_operator(operator_data)
 
-    async def _forge_message_list(self, user_message: str, retrieved_knowledge: list[dict] | None = None) -> list:
+    async def _forge_message_list(self, user_message: str, retrieved_knowledge: list[dict] | None = None, history: list | None = None) -> list:
         system_content = SYSTEM_MESSAGE_TEMPLATE.format(setting=self._setting)
         messages = [{"role": "system", "content": system_content}]
 
@@ -176,7 +167,7 @@ class AgentGeneralInterface:
                     rag_result += f"{attr_name}: {attr_value}\n"
             messages.append({"role": "user", "content": RAG_MESSAGE_TEMPLATE.format(rag_result=rag_result)})
 
-        messages.extend(self._messages)
+        messages.extend(history or [])
         messages.append({"role": "user", "content": user_message})
 
         return messages

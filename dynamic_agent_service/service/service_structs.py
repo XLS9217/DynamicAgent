@@ -29,9 +29,32 @@ class ToolExecuteResult(BaseModel):
     tool_call_id: str
     content: str
 
-class RagContext(BaseModel):
-    """
-    RAG-retrieved knowledge surfaced to the client before the agent responds.
-    """
-    type: Literal["rag_context"]
-    knowledge: list[dict]
+
+# ===== Redis-backed session state =====
+# Keys:
+#   session:{session_id}:meta      -> SessionMeta (JSON)
+#   session:{session_id}:messages  -> Redis list of MessageItem (JSON)
+#   session:{session_id}:rag       -> RagCache (JSON)
+
+class SessionMeta(BaseModel):
+    """Core session metadata. Stored at session:{session_id}:meta."""
+    session_id: str
+    setting: str
+    webhook_url: str
+    reconnect_keep: int
+    bucket_name: Optional[str] = None
+    created_at: float  # Unix timestamp
+    disconnect_time: Optional[float] = None  # set when WebSocket disconnects
+
+
+class MessageItem(BaseModel):
+    """One conversation message. Each element of session:{session_id}:messages."""
+    role: str  # "system" | "user" | "assistant"
+    content: str
+
+
+class RagCache(BaseModel):
+    """Last RAG-retrieved knowledge. Stored at session:{session_id}:rag."""
+    query: str
+    knowledge: list[dict]  # reconstructed instances (heterogeneous attribute dicts)
+    retrieved_at: float  # Unix timestamp

@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
     webhook_url = f"http://{request.client.host}:{body.webhook_port}/webhook"
-    session = RealtimeSessionManager.create(request=body, webhook_url=webhook_url)
+    session = await RealtimeSessionManager.create(request=body, webhook_url=webhook_url)
     await session.agent_setup()
 
     scheme = request.headers.get("x-forwarded-proto", "http")

@@ -6,9 +6,10 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
-from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest, MessageItem, RagCache
+from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest, RagCache
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_logger import SessionLogger
+from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 logger = get_my_logger()
@@ -37,21 +38,15 @@ class RealtimeSession:
 
     # ===== Redis-backed session state (keys owned here, not in RedisInstance) =====
 
-    def _messages_key(self) -> str:
-        return f"session:{self.session_id}:messages"
-
     def _rag_key(self) -> str:
         return f"session:{self.session_id}:rag"
 
     async def append_message(self, role: str, content: str) -> None:
-        client = RedisInstance.get_client()
-        item = MessageItem(role=role, content=content)
-        await client.rpush(self._messages_key(), item.model_dump_json())
+        await SessionAccessor.append_message(self.session_id, role, content)
 
     async def load_messages(self) -> list[dict]:
-        client = RedisInstance.get_client()
-        raw_list = await client.lrange(self._messages_key(), 0, -1)
-        return [MessageItem.model_validate_json(raw).model_dump() for raw in raw_list]
+        messages = await SessionAccessor.load_messages(self.session_id)
+        return [m.model_dump() for m in messages]
 
     async def set_rag(self, rag: RagCache) -> None:
         client = RedisInstance.get_client()

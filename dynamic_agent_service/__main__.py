@@ -17,6 +17,8 @@ from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
+from dynamic_agent_service.data.data_accessor import DataAccessor
+from dynamic_agent_service.service.session_accessor import SessionAccessor  # noqa: F401  (registers subclass)
 
 
 logger = get_my_logger()
@@ -33,6 +35,8 @@ async def lifespan(app: FastAPI):
     logger.info("KnowledgeEngine initialized")
     await RedisInstance.initialize()
     logger.info("RedisInstance initialized")
+    await DataAccessor.ensure_all_tables_exist()
+    logger.info("Database tables ensured")
 
     yield
 

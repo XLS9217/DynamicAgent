@@ -25,12 +25,11 @@ class RealtimeSession:
             cls._http = httpx.AsyncClient(mounts={"http://": None})
         return cls._http
 
-    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, bucket_name: str = None):
+    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30):
         self.session_id = str(uuid.uuid4())
         self.setting = setting
         self.webhook_url = webhook_url
         self.reconnect_keep = reconnect_keep
-        self.bucket_name = bucket_name
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
@@ -76,7 +75,6 @@ class RealtimeSession:
             setting=self.setting,
             tool_execute=tool_execute,
             session_logger=self.session_logger,
-            bucket_name=self.bucket_name,
         )
         logger.info("AGI initialized for session %s", self.session_id)
         self.session_logger.log_system("agent_setup", {
@@ -84,7 +82,6 @@ class RealtimeSession:
             "setting": self.setting,
             "webhook_url": self.webhook_url,
             "reconnect_keep": self.reconnect_keep,
-            "bucket_name": self.bucket_name,
         })
 
     def attach_websocket(self, client: WebSocket):
@@ -117,24 +114,24 @@ class RealtimeSession:
         except Exception as e:
             logger.error("Error: %s", e)
 
-    async def trigger_agent(self, text: str):
+    async def trigger_agent(self, text: str, bucket_name: str = None):
         """Trigger agent with text input. Response streams via WebSocket."""
         if self.client is None:
             raise RuntimeError("WebSocket not connected")
 
         # Start processing in background, return immediately
-        asyncio.create_task(self._process_trigger(text))
+        asyncio.create_task(self._process_trigger(text, bucket_name))
 
-    async def _process_trigger(self, text: str):
+    async def _process_trigger(self, text: str, bucket_name: str = None):
         """Background task to process trigger and stream response."""
         try:
             message = {"type": "invoke", "text": text}
 
-            # Fetch history from Redis (the only copy) before this turn's message
+            # Fetch history before this turn's message
             history = await self.load_messages()
 
             # Trigger agent with history; AGI is stateless about history
-            assistant_text, retrieved_knowledge = await self.agi.trigger(message, history=history)
+            assistant_text, retrieved_knowledge = await self.agi.trigger(message, history=history, bucket_name=bucket_name)
 
             # Persist this turn to Redis
             await self.append_message("user", text)
@@ -164,11 +161,7 @@ class RealtimeSessionManager:
             setting=request.setting,
             webhook_url=webhook_url,
             reconnect_keep=request.reconnect_keep,
-            bucket_name=request.bucket_name,
         )
-        # Initial history (if any) is seeded into Redis — the only copy of messages
-        for msg in request.messages:
-            await session.append_message(msg["role"], msg["content"])
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()
         return session

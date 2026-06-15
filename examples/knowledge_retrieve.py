@@ -30,21 +30,21 @@ async def main():
 
     print(f"Bucket exists: {bucket_name}")
 
-    # Create session with bucket
+    # Create session (bucket is attached per trigger, not at creation)
     client = await DynamicAgentClient.create(
         setting="You are a helpful assistant with knowledge about Claude Mythos Preview.",
-        bucket_name=bucket_name
     )
     print(f"Session created: {client.session_id}")
 
     def on_stream(chunk: str):
         print(chunk, end="", flush=True)
 
-    # Ask a question about the knowledge
+    # Ask a question about the knowledge, attaching the bucket for RAG this turn
     print("\nQuerying: What are the key cybersecurity capabilities of Claude Mythos Preview?\n")
     await client.trigger(
         "What are the key cybersecurity capabilities of Claude Mythos Preview?",
         on_stream=on_stream,
+        bucket_name=bucket_name,
     )
     print("\n")
 

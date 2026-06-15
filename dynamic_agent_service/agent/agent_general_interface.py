@@ -50,7 +50,6 @@ class AgentGeneralInterface:
 
         self._operator_handler = OperatorHandler()
         self._session_logger = None
-        self._bucket_name = None  # RAG bucket name
 
     @classmethod
     async def create(
@@ -60,28 +59,27 @@ class AgentGeneralInterface:
             tool_execute: Callable = None,
             stream_callback: Callable = None,
             session_logger = None,
-            bucket_name: str = None,
     ) -> "AgentGeneralInterface":
         agi = cls(language_engine)
         agi._setting = setting
         agi._stream_callback = stream_callback
         agi._operator_handler.tool_execute = tool_execute
         agi._session_logger = session_logger
-        agi._bucket_name = bucket_name
         return agi
 
     async def trigger(
         self,
         message: dict,
         history: list = None,
+        bucket_name: str = None,
     ) -> str:
         # RAG: Retrieve knowledge before answering
         retrieved_knowledge = None
-        if self._bucket_name:
+        if bucket_name:
             user_query = message.get("text", "")
             retrieved_knowledge = await KnowledgeInterface.retrieve(
                 query=user_query,
-                bucket_name=self._bucket_name,
+                bucket_name=bucket_name,
                 top_k=10
             )
             logger.info(f"Retrieved {len(retrieved_knowledge)} knowledge instances")

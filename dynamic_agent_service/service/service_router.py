@@ -20,7 +20,8 @@ async def create_session(body: CreateSessionRequest, request: Request):
     ws_scheme = "wss" if scheme == "https" else "ws"
     socket_url = f"{ws_scheme}://{request.headers['host']}/agent_session?session_id={session.session_id}"
 
-    return {"session_id": session.session_id, "socket_url": socket_url}
+    messages = await session.load_messages()
+    return {"session_id": session.session_id, "socket_url": socket_url, "messages": messages}
 
 
 @router.websocket("/agent_session")
@@ -61,6 +62,7 @@ async def register_operator(body: RegisterOperatorRequest):
 class TriggerRequest(BaseModel):
     session_id: str
     text: str
+    bucket_name: str | None = None
 
 @router.post("/trigger")
 async def trigger(body: TriggerRequest):
@@ -70,7 +72,7 @@ async def trigger(body: TriggerRequest):
     session = RealtimeSessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    await session.trigger_agent(body.text)
+    await session.trigger_agent(body.text, bucket_name=body.bucket_name)
     return {"status": "accepted"}
 
 

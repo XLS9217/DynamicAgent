@@ -9,9 +9,6 @@ class CreateSessionRequest(BaseModel):
     setting: str
     webhook_port: int
     reconnect_keep: int = 30
-    # Agent
-    messages: list = []
-    bucket_name: Optional[str] = None
 
 
 class AgentResponseChunk(BaseModel):

@@ -1,11 +1,10 @@
 """
-uv run examples/message_list.py
+uv run -m examples.message_list
 """
 import asyncio
 import os
 from dotenv import load_dotenv
 
-from examples.test_messages import ssd_chat
 from dynamic_agent_client import DynamicAgentClient
 
 load_dotenv()
@@ -18,15 +17,15 @@ async def main():
 
     client = await DynamicAgentClient.create(
         setting="You are a knowledgeable hardware advisor.",
-        messages=ssd_chat,
     )
     print(f"Session created: {client.session_id}")
+    print(f"Initial messages returned on create: {client.messages}")
 
     def on_stream(chunk: str):
         print(chunk, end="", flush=True)
 
     response = await client.trigger(
-        "Given our conversation, summarize the key takeaways about the SSD price situation in 3 bullet points.",
+        "In one sentence, what should I look for when buying an SSD?",
         on_stream=on_stream,
     )
     print()

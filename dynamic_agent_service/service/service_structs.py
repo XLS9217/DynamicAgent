@@ -9,6 +9,7 @@ class CreateSessionRequest(BaseModel):
     setting: str
     webhook_port: int
     reconnect_keep: int = 30
+    session_id: Optional[str] = None  # provided to resume an existing session
 
 
 class AgentResponseChunk(BaseModel):

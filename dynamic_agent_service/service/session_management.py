@@ -25,8 +25,8 @@ class RealtimeSession:
             cls._http = httpx.AsyncClient(mounts={"http://": None})
         return cls._http
 
-    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30):
-        self.session_id = str(uuid.uuid4())
+    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, session_id: str = None):
+        self.session_id = session_id or str(uuid.uuid4())
         self.setting = setting
         self.webhook_url = webhook_url
         self.reconnect_keep = reconnect_keep
@@ -161,6 +161,7 @@ class RealtimeSessionManager:
             setting=request.setting,
             webhook_url=webhook_url,
             reconnect_keep=request.reconnect_keep,
+            session_id=request.session_id,
         )
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()

@@ -84,7 +84,12 @@ class RealtimeSession:
             "reconnect_keep": self.reconnect_keep,
         })
 
-    def attach_websocket(self, client: WebSocket):
+    async def attach_websocket(self, client: WebSocket):
+        # Close old WebSocket if exists
+        if self.client is not None:
+            await self.client.close()
+            self.session_logger.log_system("websocket_replaced")
+
         self.client = client
         self.disconnect_time = None
         self.session_logger.log_system("websocket_connected")

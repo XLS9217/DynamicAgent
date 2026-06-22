@@ -190,7 +190,7 @@ wheels = [
 
 [[package]]
 name = "dynamic-agent-client"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "dynamic_agent_client" }
 dependencies = [
     { name = "fastapi" },

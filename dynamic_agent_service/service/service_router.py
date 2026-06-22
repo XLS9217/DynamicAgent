@@ -33,13 +33,17 @@ async def agent_session(websocket: WebSocket, session_id: str):
         return
 
     await websocket.accept()
-    session.attach_websocket(websocket)
+    await session.attach_websocket(websocket)
     logger.info("WebSocket connected for session %s", session_id)
     try:
         await session.listen()
     finally:
-        RealtimeSessionManager.mark_disconnected(session)
-        logger.info("WebSocket cleaned up for session %s", session_id)
+        # Only mark disconnected if this websocket is still the active one
+        if session.client is websocket:
+            RealtimeSessionManager.mark_disconnected(session)
+            logger.info("WebSocket cleaned up for session %s", session_id)
+        else:
+            logger.info("WebSocket was replaced for session %s, skipping disconnect", session_id)
 
 
 

@@ -139,7 +139,19 @@ async def main():
     client = await DynamicAgentClient.create(setting="You are a helpful math assistant.")
     print(f"Session created: {client.session_id}")
 
-    # 2. Register the MathOperator
+    # 2.5 Set up tool lifecycle hooks
+    def log_tool_call(tool_name: str, arguments: dict):
+        print(f"\n[TOOL CALL] {tool_name}")
+        print(f"  Arguments: {arguments}")
+
+    def log_tool_result(tool_name: str, arguments: dict, result):
+        print(f"[TOOL RESULT] {tool_name}")
+        print(f"  Result: {result}\n")
+
+    client.on_tool_call(log_tool_call)
+    client.on_tool_result(log_tool_result)
+
+    # 3. Register the MathOperator
     op = MathOperator()
     result = await client.add_operator(op)
     print(f"Operator registered: {result}")
@@ -147,14 +159,14 @@ async def main():
     def on_invoke(text: str):
         print(text)
 
-    # 3. Test cross then dot
+    # 4. Test cross then dot
     prompt, expected = generate_cross_then_dot_example()
     response = await client.trigger(prompt, on_invoke=on_invoke)
     print(f"Prompt: {prompt}")
     print(f"Expected: {expected}")
     print(f"Response: {response}\n")
 
-    # 4. Test triangle normal angle
+    # 5. Test triangle normal angle
     prompt, expected = generate_triangle_example()
     response = await client.trigger(prompt, on_invoke=on_invoke)
     print(f"Prompt: {prompt}")

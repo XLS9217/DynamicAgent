@@ -67,6 +67,20 @@ async def main():
         assert resumed_client.messages[-2]["content"] == "Say 'pong' and nothing else."
         assert resumed_client.messages[-1]["role"] == "assistant"
 
+        delete_result = await DynamicAgentClient.delete_session(SESSION_ID)
+        print(f"delete session: {delete_result}")
+        assert delete_result is True
+        await resumed_client.close()
+        resumed_client = None
+
+        deleted_client = await DynamicAgentClient.create(
+            setting="You are a concise assistant.",
+            session_id=SESSION_ID,
+        )
+        print(f"messages after delete: {deleted_client.messages}")
+        assert deleted_client.messages == [], "delete_session should clear persisted messages"
+        await deleted_client.close()
+
         print("ALL PASSED")
     finally:
         if resumed_client is not None:

@@ -13,6 +13,7 @@ from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEng
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 from dynamic_agent_service.knowledge.knowledge_structs import Blueprint
+from workflow.inbound_v2_1.merge_knowledge_workflow import MergeKnowledgeWorkflow
 from workflow.workflow_base import WorkflowBase
 
 
@@ -66,12 +67,13 @@ class PersistKnowledgeWorkflow(WorkflowBase):
 
             if collision["collides"]:
                 self.append_log(f"Collision detected: {collision['reason']}")
-                return {"persisted": False, "instance_id": None, "collision": collision}
+                instance_id = await self._merge_collision(candidates, collision)
+                return {"persisted": True, "instance_id": instance_id, "collision": collision, "merged": True}
 
         # Step 3: No collision, persist
         instance_id = await self._persist()
         self.append_log(f"Persisted instance: {instance_id}")
-        return {"persisted": True, "instance_id": instance_id, "collision": None}
+        return {"persisted": True, "instance_id": instance_id, "collision": None, "merged": False}
 
     async def _search_similar_identifiers(self) -> list[dict]:
         """Search top_k=3 existing instances by identifier embedding."""
@@ -158,29 +160,68 @@ class PersistKnowledgeWorkflow(WorkflowBase):
         except json.JSONDecodeError:
             return {"collides": False, "collides_with": None, "reason": "parse error"}
 
+    async def _merge_collision(self, candidates: list[dict], collision: dict) -> str:
+        """Merge incoming attributes into the collided existing instance."""
+        target_id = collision.get("collides_with")
+        existing = next((c for c in candidates if c.get("instance_id") == target_id), None)
+        if existing is None:
+            existing = candidates[0]
+            target_id = existing["instance_id"]
+            collision["collides_with"] = target_id
+
+        merged_attributes = await self.execute_subflow(
+            MergeKnowledgeWorkflow,
+            self.blueprint,
+            existing,
+            self.filled_attributes,
+            collision,
+        )
+        await self._replace_instance_attributes(target_id, merged_attributes)
+        self.append_log(f"Merged collision into existing instance: {target_id}")
+        return target_id
+
+    async def _replace_instance_attributes(self, instance_id: str, filled_attributes: dict[str, str]):
+        """Replace Milvus attribute nodes for an existing instance."""
+        existing_nodes = KnowledgeAccessor.get_nodes_by_instance_id(self.blueprint.bucket_name, instance_id)
+        existing_ids = [node["kn_id"] for node in existing_nodes]
+        if existing_ids:
+            KnowledgeAccessor.delete_by_ids(self.blueprint.bucket_name, existing_ids)
+
+        await self._upsert_attribute_nodes(instance_id, filled_attributes)
+
     async def _persist(self) -> str:
         """Persist filled instance to PostgreSQL and Milvus."""
         instance_id = str(uuid.uuid4())
 
+        await KnowledgeAccessor.create_instance(instance_id, self.blueprint.blueprint_id)
+        await self._upsert_attribute_nodes(instance_id, self.filled_attributes)
+        return instance_id
+
+    async def _upsert_attribute_nodes(self, instance_id: str, filled_attributes: dict[str, str]):
+        """Upsert one Milvus knowledge node per persisted blueprint attribute."""
         blueprint_attrs = await KnowledgeAccessor.get_attributes(self.blueprint.blueprint_id)
         attr_name_to_id = {attr.name: attr.attribute_id for attr in blueprint_attrs}
 
-        await KnowledgeAccessor.create_instance(instance_id, self.blueprint.blueprint_id)
+        persistable_items = [
+            (attr_name, value)
+            for attr_name, value in filled_attributes.items()
+            if attr_name in attr_name_to_id and value is not None
+        ]
+        values = [value for _, value in persistable_items]
+        if not values:
+            return
 
-        values = list(self.filled_attributes.values())
         embeddings = await KnowledgeEngine.get_embeddings(values)
 
         entities = []
-        for i, (attr_name, value) in enumerate(self.filled_attributes.items()):
-            if attr_name in attr_name_to_id:
-                entities.append({
-                    "kn_id": str(uuid.uuid4()),
-                    "instance_id": instance_id,
-                    "attribute_id": attr_name_to_id[attr_name],
-                    "value": value,
-                    "embedding": embeddings[i]
-                })
+        for i, (attr_name, value) in enumerate(persistable_items):
+            entities.append({
+                "kn_id": str(uuid.uuid4()),
+                "instance_id": instance_id,
+                "attribute_id": attr_name_to_id[attr_name],
+                "value": value,
+                "embedding": embeddings[i]
+            })
 
         KnowledgeAccessor.upsert_entities(self.blueprint.bucket_name, entities)
         self.append_log(f"Upserted {len(entities)} entities to Milvus")
-        return instance_id

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
 from dynamic_agent_service.service.session_accessor import SessionAccessor
+from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
 from dynamic_agent_service.service.service_structs import CreateSessionRequest
 from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 from dynamic_agent_service.util.setup_logging import get_my_logger
@@ -88,12 +89,16 @@ async def delete_session(session_id: str):
     """
     session = RealtimeSessionManager.get(session_id)
     if session is not None and session.client is not None:
+        client = session.client
+        session.client = None
         try:
-            await session.client.close()
+            await client.close()
         except Exception as e:
             logger.warning("Failed to close websocket for session %s: %s", session_id, e)
     RealtimeSessionManager._sessions.pop(session_id, None)
     await SessionAccessor.delete_session(session_id)
+    if session is not None:
+        await MonitorEventHub.publish("session_deleted", session_event_payload(session))
     return {"status": "ok", "session_id": session_id}
 
 

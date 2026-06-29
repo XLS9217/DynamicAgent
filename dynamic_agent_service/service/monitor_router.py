@@ -1,12 +1,66 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
-from dynamic_agent_service.service.session_management import RealtimeSessionManager
+from dynamic_agent_service.service.monitor_events import MonitorEventHub
+from dynamic_agent_service.service.session_management import RealtimeSession, RealtimeSessionManager
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
 
 router = APIRouter()
+
+
+@router.websocket("/monitor/events")
+async def monitor_events(websocket: WebSocket):
+    await MonitorEventHub.connect(websocket)
+    try:
+        await websocket.send_json({"type": "monitor_connected", "payload": {"status": "ok"}})
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        logger.info("Monitor websocket disconnected")
+    finally:
+        MonitorEventHub.disconnect(websocket)
+
+
+async def _session_summary(session: RealtimeSession) -> dict:
+    messages = await session.load_messages()
+    return {
+        "session_id": session.session_id,
+        "setting": session.setting,
+        "webhook_url": session.webhook_url,
+        "reconnect_keep": session.reconnect_keep,
+        "disconnect_time": session.disconnect_time,
+        "connected": session.client is not None and session.disconnect_time is None,
+        "expired": session.is_expired(),
+        "message_count": len(messages),
+    }
+
+
+@router.get("/monitor/sessions")
+async def list_sessions():
+    sessions = [
+        await _session_summary(session)
+        for session in RealtimeSessionManager._sessions.values()
+    ]
+    return {"status": "ok", "sessions": sessions}
+
+
+@router.get("/monitor/sessions/{session_id}")
+async def get_session(session_id: str):
+    session = RealtimeSessionManager.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    metadata = await _session_summary(session)
+    messages = await session.load_messages()
+    rag = await session.get_rag()
+    return {
+        "status": "ok",
+        "session": metadata,
+        "messages": messages,
+        "rag": rag.model_dump() if rag is not None else None,
+    }
 
 
 @router.get("/session/{session_id}/rag")

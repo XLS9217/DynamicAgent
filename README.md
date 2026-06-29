@@ -73,3 +73,7 @@ Rules for logging (implemented in `SessionLogger`):
 - **`setting.jsonl`**: Stores session configuration and initial settings.
 - **`trigger_{n}.jsonl`**: Created for each trigger event, logging tools available, initial messages, LLM responses, tool calls, results, and compaction events.
 - Writes are performed asynchronously using a background worker queue to avoid blocking main execution.
+
+
+# Service
+there are three module

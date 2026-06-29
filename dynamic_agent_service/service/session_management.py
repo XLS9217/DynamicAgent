@@ -10,6 +10,7 @@ from dynamic_agent_service.service.service_structs import AgentResponseChunk, Cr
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_logger import SessionLogger
 from dynamic_agent_service.service.session_accessor import SessionAccessor
+from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 logger = get_my_logger()
@@ -93,6 +94,7 @@ class RealtimeSession:
         self.client = client
         self.disconnect_time = None
         self.session_logger.log_system("websocket_connected")
+        MonitorEventHub.publish_nowait("session_join", session_event_payload(self))
 
         async def stream_callback(chunk: AgentResponseChunk):
             await self.client.send_json(chunk.model_dump())
@@ -170,6 +172,7 @@ class RealtimeSessionManager:
         )
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()
+        MonitorEventHub.publish_nowait("session_created", session_event_payload(session))
         return session
 
     @classmethod
@@ -182,14 +185,17 @@ class RealtimeSessionManager:
         session.disconnect_time = time.time()
         session.session_logger.log_system("websocket_disconnected")
         logger.info("Session %s marked disconnected, will expire in %s seconds", session.session_id, session.reconnect_keep)
+        MonitorEventHub.publish_nowait("session_leave", session_event_payload(session))
 
     @classmethod
     def cleanup_expired(cls):
         """Remove sessions that have been disconnected longer than reconnect_keep."""
         expired = [sid for sid, session in cls._sessions.items() if session.is_expired()]
         for sid in expired:
-            cls._sessions.pop(sid, None)
+            session = cls._sessions.pop(sid, None)
             logger.info("Session %s expired and removed", sid)
+            if session is not None:
+                MonitorEventHub.publish_nowait("session_expired", session_event_payload(session))
 
     @classmethod
     def _ensure_cleanup_task(cls):

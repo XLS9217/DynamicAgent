@@ -137,13 +137,15 @@ class KnowledgeInboundRequest(BaseModel):
     instruction_query: str
     knowledge_text: str
     bucket_name: str
+    source_metadata: dict | None = None
 
 @router.post("/knowledge/inbound")
 async def knowledge_inbound(body: KnowledgeInboundRequest):
     result = await KnowledgeInterface.inbound(
         instruction_query=body.instruction_query,
         knowledge_text=body.knowledge_text,
-        bucket_name=body.bucket_name
+        bucket_name=body.bucket_name,
+        source_metadata=body.source_metadata,
     )
     return {"status": "ok", "message": result}
 

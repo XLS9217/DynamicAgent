@@ -7,6 +7,7 @@ Handles:
 - Knowledge node operations (Milvus)
 """
 import uuid
+import json
 from pymilvus import DataType, Function, FunctionType
 
 from dynamic_agent_service.data.data_accessor import DataAccessor
@@ -14,12 +15,19 @@ from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
 from dynamic_agent_service.knowledge.knowledge_structs import (
-    Bucket, Blueprint, BlueprintAttribute, BlueprintAttributeSchema, BlueprintInstance,
+    Bucket, Blueprint, BlueprintAttribute, BlueprintAttributeSchema, BlueprintInstance, InstanceSource,
 )
 
 
 def _collection_name(bucket_name: str) -> str:
     return f"bucket_{bucket_name.replace('-', '_')}"
+
+
+def _decode_source_row(row) -> InstanceSource:
+    data = dict(row)
+    if isinstance(data["source_metadata"], str):
+        data["source_metadata"] = json.loads(data["source_metadata"])
+    return InstanceSource(**data)
 
 
 class KnowledgeAccessor(DataAccessor):
@@ -54,6 +62,11 @@ class KnowledgeAccessor(DataAccessor):
                 CREATE TABLE IF NOT EXISTS blueprint_instance (
                     instance_id  TEXT PRIMARY KEY,
                     blueprint_id TEXT NOT NULL REFERENCES blueprint(blueprint_id)
+                );
+                CREATE TABLE IF NOT EXISTS instance_source (
+                    source_id       TEXT PRIMARY KEY,
+                    instance_id     TEXT NOT NULL REFERENCES blueprint_instance(instance_id) ON DELETE CASCADE,
+                    source_metadata JSONB NOT NULL
                 );
             """)
         return True
@@ -125,6 +138,15 @@ class KnowledgeAccessor(DataAccessor):
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                await conn.execute("""
+                    DELETE FROM instance_source
+                    WHERE instance_id IN (
+                        SELECT bi.instance_id
+                        FROM blueprint_instance bi
+                        JOIN blueprint b ON bi.blueprint_id = b.blueprint_id
+                        WHERE b.bucket_name = $1
+                    )
+                """, bucket_name)
                 await conn.execute("""
                     DELETE FROM blueprint_instance
                     WHERE blueprint_id IN (
@@ -219,6 +241,46 @@ class KnowledgeAccessor(DataAccessor):
                 "INSERT INTO blueprint_instance (instance_id, blueprint_id) VALUES ($1, $2)",
                 instance_id, blueprint_id,
             )
+
+    @staticmethod
+    async def create_instance_source(instance_id: str, source_metadata: dict) -> str:
+        """Attach caller-provided source metadata to a persisted instance."""
+        source_id = str(uuid.uuid4())
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO instance_source (source_id, instance_id, source_metadata) VALUES ($1, $2, $3::jsonb)",
+                source_id, instance_id, json.dumps(source_metadata, ensure_ascii=False),
+            )
+        return source_id
+
+    @staticmethod
+    async def get_sources_by_instance(instance_id: str) -> list[InstanceSource]:
+        """Get source metadata rows attached to one instance."""
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT source_id, instance_id, source_metadata FROM instance_source WHERE instance_id = $1 ORDER BY source_id",
+                instance_id,
+            )
+            return [_decode_source_row(r) for r in rows]
+
+    @staticmethod
+    async def get_sources_by_instances(instance_ids: list[str]) -> dict[str, list[InstanceSource]]:
+        """Get source metadata rows grouped by instance_id."""
+        if not instance_ids:
+            return {}
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT source_id, instance_id, source_metadata FROM instance_source WHERE instance_id = ANY($1::text[]) ORDER BY source_id",
+                instance_ids,
+            )
+        grouped = {iid: [] for iid in instance_ids}
+        for row in rows:
+            source = _decode_source_row(row)
+            grouped.setdefault(source.instance_id, []).append(source)
+        return grouped
 
     @staticmethod
     async def get_instances_by_blueprint(blueprint_id: str) -> list[str]:

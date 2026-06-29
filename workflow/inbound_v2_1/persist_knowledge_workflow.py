@@ -39,16 +39,40 @@ Respond with ONLY valid JSON:
 {{"collides": true/false, "collides_with": "instance_id or null", "reason": "brief explanation"}}
 """
 
+SOURCE_DECISION_SYSTEM_PROMPT = """You are a source metadata merge agent.
+
+You decide whether incoming source metadata should be attached to an existing knowledge instance.
+
+Rules:
+- Append when the incoming metadata represents a distinct useful source or contains useful new provenance.
+- Do not append when it is clearly the same source metadata already attached.
+- Do not modify existing metadata.
+"""
+
+SOURCE_DECISION_USER_PROMPT = """Existing source metadata rows:
+{existing_sources_json}
+
+Incoming source metadata:
+{incoming_source_json}
+
+Should the incoming source metadata be appended to this instance?
+
+Respond with ONLY valid JSON:
+{{"append": true/false, "reason": "brief explanation"}}
+"""
+
 
 class PersistKnowledgeWorkflow(WorkflowBase):
     def __init__(self):
         super().__init__()
         self.blueprint = None
         self.filled_attributes = {}
+        self.source_metadata = None
 
-    async def build(self, blueprint: Blueprint, filled_attributes: dict[str, str]):
+    async def build(self, blueprint: Blueprint, filled_attributes: dict[str, str], source_metadata: dict | None = None):
         self.blueprint = blueprint
         self.filled_attributes = filled_attributes
+        self.source_metadata = source_metadata
         return self
 
     async def execute(self) -> dict:
@@ -68,6 +92,7 @@ class PersistKnowledgeWorkflow(WorkflowBase):
             if collision["collides"]:
                 self.append_log(f"Collision detected: {collision['reason']}")
                 instance_id = await self._merge_collision(candidates, collision)
+                await self._maybe_attach_source_after_collision(instance_id)
                 return {"persisted": True, "instance_id": instance_id, "collision": collision, "merged": True}
 
         # Step 3: No collision, persist
@@ -195,7 +220,50 @@ class PersistKnowledgeWorkflow(WorkflowBase):
 
         await KnowledgeAccessor.create_instance(instance_id, self.blueprint.blueprint_id)
         await self._upsert_attribute_nodes(instance_id, self.filled_attributes)
+        await self._attach_source(instance_id)
         return instance_id
+
+    async def _attach_source(self, instance_id: str):
+        """Attach source metadata when the caller provided it."""
+        if not self.source_metadata:
+            return
+        await KnowledgeAccessor.create_instance_source(instance_id, self.source_metadata)
+        self.append_log(f"Attached source metadata to instance: {instance_id}")
+
+    async def _maybe_attach_source_after_collision(self, instance_id: str):
+        """Use an LLM decision to append source metadata to an existing collided instance."""
+        if not self.source_metadata:
+            self.append_log("No source metadata provided; skipped source append decision")
+            return
+
+        existing_sources = await KnowledgeAccessor.get_sources_by_instance(instance_id)
+        existing_source_payloads = [source.source_metadata for source in existing_sources]
+        if not existing_source_payloads:
+            await self._attach_source(instance_id)
+            return
+
+        decision = await self._decide_source_append(existing_source_payloads)
+        if decision.get("append"):
+            await self._attach_source(instance_id)
+            self.append_log(f"Appended source metadata after collision: {decision.get('reason', '')}")
+        else:
+            self.append_log(f"Skipped source metadata append after collision: {decision.get('reason', '')}")
+
+    async def _decide_source_append(self, existing_sources: list[dict]) -> dict:
+        existing_json = json.dumps(existing_sources, ensure_ascii=False, indent=2)
+        incoming_json = json.dumps(self.source_metadata, ensure_ascii=False, indent=2)
+        user_prompt = SOURCE_DECISION_USER_PROMPT.format(
+            existing_sources_json=existing_json,
+            incoming_source_json=incoming_json,
+        )
+        raw = await self.invoke_agent([
+            {"role": "system", "content": SOURCE_DECISION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt},
+        ])
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {"append": True, "reason": "parse error; default append to preserve provenance"}
 
     async def _upsert_attribute_nodes(self, instance_id: str, filled_attributes: dict[str, str]):
         """Upsert one Milvus knowledge node per persisted blueprint attribute."""

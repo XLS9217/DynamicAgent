@@ -37,3 +37,9 @@ class BlueprintAttribute(BaseModel):
 class BlueprintInstance(BaseModel):
     instance_id: str
     blueprint_id: str
+
+
+class InstanceSource(BaseModel):
+    source_id: str
+    instance_id: str
+    source_metadata: dict

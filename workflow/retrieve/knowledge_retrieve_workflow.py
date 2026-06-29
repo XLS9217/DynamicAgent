@@ -153,6 +153,11 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
 
         # Get all instances data once for efficiency
         all_instances_data = await self.knowledge_accessor.get_all_instances(self.bucket_name)
+        instance_to_blueprint_id = {
+            inst.instance_id: inst.blueprint_id
+            for inst in all_instances_data
+        }
+        sources_by_instance = await self.knowledge_accessor.get_sources_by_instances(list(instance_groups.keys()))
 
         for iid, group in instance_groups.items():
             # Get all nodes for this instance from Milvus
@@ -161,11 +166,7 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
                 continue
 
             # Find blueprint_id from all_instances_data
-            blueprint_id = None
-            for inst_data in all_instances_data:
-                if inst_data.instance_id == iid:
-                    blueprint_id = inst_data.blueprint_id
-                    break
+            blueprint_id = instance_to_blueprint_id.get(iid)
 
             if not blueprint_id:
                 continue
@@ -189,6 +190,13 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
 
             # Build filled_attributes
             filled_attributes = {}
+            filled_attributes["_instance_id"] = iid
+            filled_attributes["_blueprint_id"] = blueprint_id
+            filled_attributes["_blueprint_name"] = blueprint.name
+            filled_attributes["_source_metadata"] = [
+                source.source_metadata
+                for source in sources_by_instance.get(iid, [])
+            ]
 
             # Initialize all attributes with description + node_id
             for node in nodes:

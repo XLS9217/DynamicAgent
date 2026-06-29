@@ -159,9 +159,9 @@ class DynamicAgentClient:
         return await ServiceHandler.delete_bucket(name)
 
     @classmethod
-    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str):
+    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str, source_metadata: dict = None):
         """Inbound knowledge into a bucket."""
-        return await ServiceHandler.inbound(instruction_query, knowledge_text, bucket_name)
+        return await ServiceHandler.inbound(instruction_query, knowledge_text, bucket_name, source_metadata)
 
     @classmethod
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):

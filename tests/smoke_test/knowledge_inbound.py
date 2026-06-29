@@ -25,6 +25,7 @@ load_dotenv()
 
 BUCKET_NAME = "smoke-knowledge-inbound"
 RESOURCE_PATH = Path(__file__).parent.parent / "resource" / "smoke_inbound_text.txt"
+SOURCE_METADATA = {"source": RESOURCE_PATH.name}
 
 
 async def print_inbounded_content(bucket_name: str):
@@ -46,6 +47,9 @@ async def print_inbounded_content(bucket_name: str):
         for instance_index, instance in enumerate(instances, 1):
             print(f"\n  --- Instance {instance_index} ---")
             print(json.dumps(instance, ensure_ascii=False, indent=2))
+            sources = await KnowledgeAccessor.get_sources_by_instance(instance["instance_id"])
+            print("  sources:")
+            print(json.dumps([source.source_metadata for source in sources], ensure_ascii=False, indent=2))
 
     print(f"\ntotal_instances: {total_instances}")
     return blueprints, total_instances
@@ -80,12 +84,25 @@ async def main():
             instruction_query=instruction_query,
             knowledge_text=knowledge_text,
             bucket_name=BUCKET_NAME,
+            source_metadata=SOURCE_METADATA,
         )
         print(f"inbound_result: {inbound_result}")
 
         blueprints, total_instances = await print_inbounded_content(BUCKET_NAME)
         assert blueprints, "expected at least one blueprint to be inbounded"
         assert total_instances > 0, "expected at least one filled instance to be inbounded"
+
+        inbounded_source_metadata = []
+        for blueprint in blueprints:
+            instances = await KnowledgeAccessor.get_filled_instances_by_blueprint(blueprint.blueprint_id)
+            for instance in instances:
+                sources = await KnowledgeAccessor.get_sources_by_instance(instance["instance_id"])
+                inbounded_source_metadata.extend(source.source_metadata for source in sources)
+
+        assert any(
+            source_metadata.get("source") == RESOURCE_PATH.name
+            for source_metadata in inbounded_source_metadata
+        ), f"expected inbound source metadata with source={RESOURCE_PATH.name}"
 
         print("\nALL PASSED")
     finally:

@@ -156,7 +156,7 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
-    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str):
+    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str, source_metadata: dict = None):
         """Inbound knowledge into a bucket via HTTP POST."""
         # TO-DO: For large texts this can exceed the timeout. Design an async approach
         # (e.g. return task_id immediately, push result via WebSocket channel).
@@ -166,6 +166,7 @@ class ServiceHandler:
                 "instruction_query": instruction_query,
                 "knowledge_text": knowledge_text,
                 "bucket_name": bucket_name,
+                "source_metadata": source_metadata,
             },
             timeout=300.0,
         )

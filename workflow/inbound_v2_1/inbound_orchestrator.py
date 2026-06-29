@@ -23,11 +23,13 @@ class InboundOrchestrator(WorkflowBase):
         self.inbound_query = ""
         self.knowledge_text = ""
         self.bucket_name = ""
+        self.source_metadata = None
 
-    async def build(self, inbound_query: str, knowledge_text: str, bucket_name: str):
+    async def build(self, inbound_query: str, knowledge_text: str, bucket_name: str, source_metadata: dict | None = None):
         self.inbound_query = inbound_query
         self.knowledge_text = knowledge_text
         self.bucket_name = bucket_name
+        self.source_metadata = source_metadata
         return self
 
     async def execute(self) -> list[dict]:
@@ -104,7 +106,8 @@ class InboundOrchestrator(WorkflowBase):
                 persist_result = await self.execute_subflow(
                     PersistKnowledgeWorkflow,
                     blueprint,
-                    filled_attributes
+                    filled_attributes,
+                    self.source_metadata,
                 )
 
                 filled_instances.append({

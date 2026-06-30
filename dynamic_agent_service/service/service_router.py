@@ -138,6 +138,7 @@ class KnowledgeInboundRequest(BaseModel):
     knowledge_text: str
     bucket_name: str
     source_metadata: dict | None = None
+    entity_limit_one: bool = False
 
 @router.post("/knowledge/inbound")
 async def knowledge_inbound(body: KnowledgeInboundRequest):
@@ -146,6 +147,7 @@ async def knowledge_inbound(body: KnowledgeInboundRequest):
         knowledge_text=body.knowledge_text,
         bucket_name=body.bucket_name,
         source_metadata=body.source_metadata,
+        entity_limit_one=body.entity_limit_one,
     )
     return {"status": "ok", "message": result}
 

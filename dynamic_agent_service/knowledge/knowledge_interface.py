@@ -79,7 +79,15 @@ class KnowledgeInterface:
         return f"Bucket {name} deleted successfully"
 
     @classmethod
-    async def inbound(cls, instruction_query: str, knowledge_text: str, bucket_name: str, source_metadata: dict | None = None, workflow_log_path=None):
+    async def inbound(
+        cls,
+        instruction_query: str,
+        knowledge_text: str,
+        bucket_name: str,
+        source_metadata: dict | None = None,
+        entity_limit_one: bool = False,
+        workflow_log_path=None,
+    ):
         """
         Inbound entry point after file textification.
         Runs blueprint matching → filling → collision → storage, all scoped to bucket.
@@ -96,6 +104,7 @@ class KnowledgeInterface:
             knowledge_text,
             bucket_name,
             source_metadata,
+            entity_limit_one,
             workflow_log_path=workflow_log_path
         )
         results = await inbound_wf.execute()

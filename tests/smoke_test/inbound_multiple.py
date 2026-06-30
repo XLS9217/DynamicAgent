@@ -1,9 +1,8 @@
 """
-Smoke test knowledge inbound from the Claude Mythos resource.
+Smoke test normal knowledge inbound with multi-entity identification.
 
-The script creates a deterministic test bucket through the SDK, inbounds the
-resource text through the service API, directly fetches and prints all stored
-blueprints and filled instances, then deletes the test bucket.
+This script uses the same prompt and text as inbound_one.py. The only intended
+behavior difference is entity_limit_one=False.
 """
 import asyncio
 import json
@@ -23,9 +22,24 @@ from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 load_dotenv()
 
 
-BUCKET_NAME = "smoke-knowledge-inbound"
+BUCKET_NAME = "smoke-inbound-multiple"
 RESOURCE_PATH = Path(__file__).parent.parent / "resource" / "smoke_inbound_text.txt"
+INSTRUCTION_QUERY = (
+    "Extract the project meeting knowledge from this text. The knowledge we care "
+    "about is meeting summary, decisions, and action items."
+)
 SOURCE_METADATA = {"source": RESOURCE_PATH.name}
+
+
+async def wait_for_filled_instances(blueprint_id: str, attempts: int = 6, delay: float = 2.0):
+    instances = []
+    for attempt in range(attempts):
+        instances = await KnowledgeAccessor.get_filled_instances_by_blueprint(blueprint_id)
+        if instances and all(len(instance) > 1 for instance in instances):
+            return instances
+        if attempt < attempts - 1:
+            await asyncio.sleep(delay)
+    return instances
 
 
 async def print_inbounded_content(bucket_name: str):
@@ -41,7 +55,7 @@ async def print_inbounded_content(bucket_name: str):
             identifier = " identifier" if attr_schema.is_identifier else ""
             print(f"  - {attr_name}{identifier}: {attr_schema.description}")
 
-        instances = await KnowledgeAccessor.get_filled_instances_by_blueprint(blueprint.blueprint_id)
+        instances = await wait_for_filled_instances(blueprint.blueprint_id)
         total_instances += len(instances)
         print(f"instances: {len(instances)}")
         for instance_index, instance in enumerate(instances, 1):
@@ -63,6 +77,8 @@ async def main():
         knowledge_text = RESOURCE_PATH.read_text(encoding="utf-8")
         print(f"resource: {RESOURCE_PATH}")
         print(f"characters: {len(knowledge_text)}")
+        print(f"instruction_query: {INSTRUCTION_QUERY}")
+        print("entity_limit_one: False")
 
         port = os.getenv("PORT", "7777")
         await DynamicAgentClient.connect(server_addr=f"http://localhost:{port}")
@@ -75,16 +91,16 @@ async def main():
         print(f"creating bucket: {BUCKET_NAME}")
         await DynamicAgentClient.create_bucket(
             name=BUCKET_NAME,
-            description="Smoke test bucket for Claude Mythos inbound",
+            description="Smoke test bucket for multi-entity inbound",
         )
 
-        instruction_query = "Find the two games mentioned in the text."
         print("inbounding knowledge...")
         inbound_result = await DynamicAgentClient.inbound(
-            instruction_query=instruction_query,
+            instruction_query=INSTRUCTION_QUERY,
             knowledge_text=knowledge_text,
             bucket_name=BUCKET_NAME,
             source_metadata=SOURCE_METADATA,
+            entity_limit_one=False,
         )
         print(f"inbound_result: {inbound_result}")
 
@@ -94,7 +110,7 @@ async def main():
 
         inbounded_source_metadata = []
         for blueprint in blueprints:
-            instances = await KnowledgeAccessor.get_filled_instances_by_blueprint(blueprint.blueprint_id)
+            instances = await wait_for_filled_instances(blueprint.blueprint_id)
             for instance in instances:
                 sources = await KnowledgeAccessor.get_sources_by_instance(instance["instance_id"])
                 inbounded_source_metadata.extend(source.source_metadata for source in sources)

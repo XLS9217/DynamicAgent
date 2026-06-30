@@ -1,5 +1,27 @@
-Two popular multiplayer games are Grand Theft Auto V and Counter-Strike 2.
+Product planning meeting: Atlas Sync launch review
+Date: 2026-06-18
+Source: meeting transcript
 
-Grand Theft Auto V, often called GTA 5, is an open-world action game from Rockstar Games. It includes a story campaign and GTA Online, where players drive vehicles, complete missions, buy properties, and explore Los Santos with other players.
+Participants:
+- Maya Chen, product manager
+- Omar Singh, backend engineer
+- Lina Park, product designer
+- Jordan Lee, customer success lead
 
-Counter-Strike 2, often called CS2, is a tactical first-person shooter from Valve. It focuses on team-based matches where terrorists and counter-terrorists compete around objectives such as bomb planting, bomb defusal, and site control.
+Meeting summary:
+The team reviewed the launch plan for Atlas Sync, a collaboration feature that keeps customer notes, project tasks, and meeting summaries synchronized across the workspace. Maya said the beta should ship on July 15 if the import reliability issue is fixed by July 5. Omar said the sync worker currently retries failed imports three times, but large customer workspaces can still time out. Lina proposed a clearer progress screen so users can see which projects are still syncing. Jordan reported that Beacon Dashboard customers want an admin export before they join the Atlas Sync beta.
+
+Decisions:
+- Atlas Sync beta remains scheduled for July 15.
+- The beta will be limited to five design partner accounts.
+- Beacon Dashboard export support is required before Beacon customers are invited.
+
+Action items:
+- Omar will add timeout metrics and a larger import retry window by July 5.
+- Lina will update the sync progress screen by July 8.
+- Jordan will confirm the first five design partner accounts by July 10.
+- Maya will prepare the beta announcement after the reliability review.
+
+Risks:
+- Large workspace imports may still fail during the first sync.
+- Beacon Dashboard customers may delay onboarding if export support is missing.

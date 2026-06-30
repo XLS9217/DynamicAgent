@@ -13,6 +13,7 @@ from workflow.inbound_v2_1.blueprint_generation_workflow import BlueprintGenerat
 from workflow.inbound_v2_1.blueprint_identify_workflow import BlueprintIdentifyWorkflow
 from workflow.inbound_v2_1.entity_type_identify_workflow import EntityIdentifyWorkflow
 from workflow.inbound_v2_1.fill_blueprint_workflow import FillBlueprintWorkflow
+from workflow.inbound_v2_1.one_entity_identify_workflow import OneEntityIdentifyWorkflow
 from workflow.inbound_v2_1.persist_knowledge_workflow import PersistKnowledgeWorkflow
 from workflow.workflow_base import WorkflowBase
 
@@ -24,12 +25,21 @@ class InboundOrchestrator(WorkflowBase):
         self.knowledge_text = ""
         self.bucket_name = ""
         self.source_metadata = None
+        self.entity_limit_one = False
 
-    async def build(self, inbound_query: str, knowledge_text: str, bucket_name: str, source_metadata: dict | None = None):
+    async def build(
+        self,
+        inbound_query: str,
+        knowledge_text: str,
+        bucket_name: str,
+        source_metadata: dict | None = None,
+        entity_limit_one: bool = False,
+    ):
         self.inbound_query = inbound_query
         self.knowledge_text = knowledge_text
         self.bucket_name = bucket_name
         self.source_metadata = source_metadata
+        self.entity_limit_one = entity_limit_one
         return self
 
     async def execute(self) -> list[dict]:
@@ -46,11 +56,20 @@ class InboundOrchestrator(WorkflowBase):
         self.append_log(f"Query: {self.inbound_query}")
 
         # Step 1: Identify entity types
-        entity_types = await self.execute_subflow(
-            EntityIdentifyWorkflow,
-            self.inbound_query,
-            self.knowledge_text
-        )
+        if self.entity_limit_one:
+            entity_type = await self.execute_subflow(
+                OneEntityIdentifyWorkflow,
+                self.inbound_query,
+                self.knowledge_text,
+                self.source_metadata,
+            )
+            entity_types = [entity_type]
+        else:
+            entity_types = await self.execute_subflow(
+                EntityIdentifyWorkflow,
+                self.inbound_query,
+                self.knowledge_text
+            )
         self.append_log(f"Identified {len(entity_types)} entity types")
 
         # Step 2: For each entity type, find or create blueprint

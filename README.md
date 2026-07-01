@@ -1,5 +1,7 @@
 uv run -m dynamic_agent_service
 
+docker run -d --name dynamic-agent --env-file .env -p 7788:7777 -v ${PWD}\cache:/app/cache dynamic-agent
+
 # Operator
 How to use the operator:
 1. Define a class inheriting from `AgentOperator`.

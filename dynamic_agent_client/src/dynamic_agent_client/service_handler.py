@@ -163,6 +163,7 @@ class ServiceHandler:
         bucket_name: str,
         source_metadata: dict = None,
         entity_limit_one: bool = False,
+        use_existing_blueprint: bool = False,
     ):
         """Inbound knowledge into a bucket via HTTP POST."""
         # TO-DO: For large texts this can exceed the timeout. Design an async approach
@@ -175,6 +176,7 @@ class ServiceHandler:
                 "bucket_name": bucket_name,
                 "source_metadata": source_metadata,
                 "entity_limit_one": entity_limit_one,
+                "use_existing_blueprint": use_existing_blueprint,
             },
             timeout=300.0,
         )

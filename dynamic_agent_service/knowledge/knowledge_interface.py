@@ -86,6 +86,7 @@ class KnowledgeInterface:
         bucket_name: str,
         source_metadata: dict | None = None,
         entity_limit_one: bool = False,
+        use_existing_blueprint: bool = False,
         workflow_log_path=None,
     ):
         """
@@ -105,6 +106,7 @@ class KnowledgeInterface:
             bucket_name,
             source_metadata,
             entity_limit_one,
+            use_existing_blueprint,
             workflow_log_path=workflow_log_path
         )
         results = await inbound_wf.execute()

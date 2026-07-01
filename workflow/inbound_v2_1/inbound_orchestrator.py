@@ -26,6 +26,7 @@ class InboundOrchestrator(WorkflowBase):
         self.bucket_name = ""
         self.source_metadata = None
         self.entity_limit_one = False
+        self.use_existing_blueprint = False
 
     async def build(
         self,
@@ -34,12 +35,14 @@ class InboundOrchestrator(WorkflowBase):
         bucket_name: str,
         source_metadata: dict | None = None,
         entity_limit_one: bool = False,
+        use_existing_blueprint: bool = False,
     ):
         self.inbound_query = inbound_query
         self.knowledge_text = knowledge_text
         self.bucket_name = bucket_name
         self.source_metadata = source_metadata
         self.entity_limit_one = entity_limit_one
+        self.use_existing_blueprint = use_existing_blueprint
         return self
 
     async def execute(self) -> list[dict]:
@@ -88,6 +91,14 @@ class InboundOrchestrator(WorkflowBase):
                         blueprints.append(bp)
                         self.append_log(f"Reusing blueprint: {bp.name}")
             else:
+                if self.use_existing_blueprint:
+                    self.append_log(
+                        "ERROR: No existing blueprint matched entity type "
+                        f"'{entity_type.get('type_name')}'. Skipping because "
+                        "use_existing_blueprint=True."
+                    )
+                    continue
+
                 new_bp = await self.execute_subflow(
                     BlueprintGenerationWorkflow,
                     entity_type['type_name'],

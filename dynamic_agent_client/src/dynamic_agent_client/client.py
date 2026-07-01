@@ -68,12 +68,57 @@ class DynamicAgentClient:
 
                     if data.get("finished"):
                         self._response_done.set()
+                elif data.get("type") == "tool_call":
+                    await self._handle_tool_call(data)
         except websockets.exceptions.ConnectionClosed:
             pass
         except asyncio.CancelledError:
             pass
 
         self._connected = False
+
+    async def _handle_tool_call(self, data: dict):
+        llm_tool_name = data.get("name", "")
+        arguments = data.get("arguments") or {}
+        tool_call_id = data["tool_call_id"]
+
+        for key, value in list(arguments.items()):
+            if isinstance(value, str):
+                try:
+                    arguments[key] = json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        ok = True
+        try:
+            callable_func = self.tool_map[llm_tool_name]
+            if self._on_tool_call:
+                try:
+                    self._on_tool_call(llm_tool_name, arguments)
+                except Exception as exc:
+                    print(f"[tool_call] WARNING: on_tool_call hook failed: {exc}")
+            result = callable_func(**arguments)
+        except KeyError:
+            ok = False
+            result = f"Tool not found: {llm_tool_name}"
+            print(f"[tool_call] ERROR: {result}")
+        except Exception as exc:
+            ok = False
+            result = f"Error: Tool execution failed: {exc}"
+            print(f"[tool_call] ERROR: {result}")
+
+        if self._on_tool_result:
+            try:
+                self._on_tool_result(llm_tool_name, arguments, result)
+            except Exception as exc:
+                print(f"[tool_call] WARNING: on_tool_result hook failed: {exc}")
+
+        await ServiceHandler.send_tool_result(
+            session_id=self.session_id,
+            tool_call_id=tool_call_id,
+            ok=ok,
+            result=result,
+        )
 
     async def trigger(
         self,

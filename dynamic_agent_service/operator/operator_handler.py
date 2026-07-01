@@ -2,18 +2,13 @@
 Operator registry and tool execution coordinator.
 
 This module defines the OperatorHandler class, which manages the lifecycle of operators
-and coordinates tool execution between the LLM and client webhooks.
+and provides LLM-facing tool metadata.
 
 Key responsibilities:
 1. Register operators sent from clients (stores ServiceOperator instances)
 2. Build combined operator menu for system prompt injection
 3. Collect tool schemas for LLM function calling
-4. Execute tool calls by forwarding to client webhook and collecting results
-
-Architecture:
-    LLM returns tool_calls → OperatorHandler.execute() → HTTP POST to client webhook
-    → client executes Python method → returns result → formatted as tool_message
-    → appended to conversation → next LLM call
+4. Build OpenAI-format assistant tool-call messages
 
 The OperatorHandler acts as a bridge between the LLM's tool calling interface and
 the client's actual tool implementations, without knowing implementation details.
@@ -36,12 +31,10 @@ class OperatorHandler:
 
     Attributes:
         _operator_dict: Maps operator name to ServiceOperator instance
-        tool_execute: Async callback to execute tool via webhook (set by AGI)
     """
 
     def __init__(self):
         self._operator_dict: dict[str, ServiceOperator] = {}
-        self.tool_execute = None  # async callable(AgentToolCall) -> str
 
     def register_operator(self, operator_data: dict):
         """
@@ -75,21 +68,8 @@ class OperatorHandler:
     def get_operator(self, name: str) -> ServiceOperator | None:
         return self._operator_dict.get(name)
 
-    async def execute(self, invoke_result: AgentInvokeResult) -> list[dict]:
-        """
-        Execute tool calls via client webhook and return OpenAI-formatted messages.
-
-        Takes the LLM's invoke result containing tool calls, forwards each to the
-        client webhook via self.tool_execute, and returns the assistant + tool messages
-        ready to append to the conversation.
-
-        Args:
-            invoke_result: LLM response containing tool_calls and optional text
-
-        Returns:
-            [assistant_message_with_tool_calls, tool_result_1, tool_result_2, ...]
-        """
-        assistant_message = {
+    def build_assistant_tool_call_message(self, invoke_result: AgentInvokeResult) -> dict:
+        return {
             "role": "assistant",
             "content": invoke_result.full_text or None,
             "tool_calls": [
@@ -104,17 +84,3 @@ class OperatorHandler:
                 for tc in invoke_result.tool_calls
             ]
         }
-
-        tool_messages = []
-        for tc in invoke_result.tool_calls:
-            result = await self.tool_execute(tc)
-            tool_messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": result
-            })
-
-        # logger.info(f"Assistant message: {assistant_message}")
-        # logger.info(f"Tool messages: {tool_messages}")
-
-        return [assistant_message] + tool_messages

@@ -5,12 +5,9 @@ All clients go through ServiceHandler — one webhook port for all sessions.
 import asyncio
 import json
 import re
-import socket
 
 import httpx
-import uvicorn
 import websockets
-from fastapi import FastAPI, Request as FastAPIRequest
 
 
 def _make_httpx_client() -> httpx.AsyncClient:
@@ -32,10 +29,6 @@ class ServiceHandler:
     4. Handles add_operator on behalf of client
     """
 
-    _app: FastAPI = None
-    _server = None
-    _server_task = None
-    _port: int = None
     _server_addr: str = None
     _clients: dict = {}  # session_id -> DynamicAgentClient
     _http: httpx.AsyncClient = None
@@ -49,8 +42,6 @@ class ServiceHandler:
         cls._server_addr = server_addr.rstrip("/")
         if cls._http is None:
             cls._http = _make_httpx_client()
-        if cls._server is None:
-            await cls._start_webhook_server()
 
     @classmethod
     async def create_session(cls, setting: str, client, reconnect_keep: int = 30, session_id: str = None) -> tuple:
@@ -61,7 +52,6 @@ class ServiceHandler:
             f"{cls._server_addr}/create_session",
             json={
                 "setting": setting,
-                "webhook_port": cls._port,
                 "reconnect_keep": reconnect_keep,
                 "session_id": session_id,
             },
@@ -109,6 +99,22 @@ class ServiceHandler:
         resp = await cls._http.post(
             f"{cls._server_addr}/trigger",
             json={"session_id": session_id, "text": text, "bucket_name": bucket_name},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @classmethod
+    async def send_tool_result(cls, session_id: str, tool_call_id: str, ok: bool, result):
+        """Send a locally executed tool result back to the service."""
+        serialized_result = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        resp = await cls._http.post(
+            f"{cls._server_addr}/tool_result",
+            json={
+                "session_id": session_id,
+                "tool_call_id": tool_call_id,
+                "ok": ok,
+                "result": serialized_result,
+            },
         )
         resp.raise_for_status()
         return resp.json()
@@ -223,96 +229,8 @@ class ServiceHandler:
         cls._clients.pop(session_id, None)
 
     @classmethod
-    async def _start_webhook_server(cls):
-        cls._port = cls._find_free_port()
-        cls._app = FastAPI()
-
-        @cls._app.post("/webhook")
-        async def webhook(request: FastAPIRequest):
-            data = await request.json()
-            session_id = data.get("session_id")
-            client = cls._clients.get(session_id)
-
-            # Defensive: check if client exists
-            if client is None:
-                error_msg = f"Client not found for session {session_id}"
-                print(f"[webhook] ERROR: {error_msg}")
-                return f"Error: {error_msg}"
-
-            # Defensive: check if tool_map is initialized
-            if not hasattr(client, 'tool_map') or client.tool_map is None:
-                error_msg = f"Client tool_map not initialized for session {session_id}"
-                print(f"[webhook] ERROR: {error_msg}")
-                return f"Error: {error_msg}"
-
-            tool_name = data.get("name", "")
-            arguments = json.loads(_sanitize_json(data.get("arguments", "{}")))
-
-            for key, value in arguments.items():
-                if isinstance(value, str):
-                    try:
-                        arguments[key] = json.loads(value)
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-
-            callable_func = client.tool_map.get(tool_name)
-
-            # Defensive: check if tool exists
-            if callable_func is None:
-                error_msg = f"Tool '{tool_name}' not found in session {session_id}"
-                print(f"[webhook] ERROR: {error_msg}")
-                return f"Error: {error_msg}"
-
-            # Hook: before tool execution
-            if client._on_tool_call:
-                try:
-                    client._on_tool_call(tool_name, arguments)
-                except Exception as e:
-                    print(f"[webhook] WARNING: on_tool_call hook failed: {e}")
-
-            # Execute tool
-            try:
-                result = callable_func(**arguments)
-            except Exception as e:
-                result = f"Error: Tool execution failed: {e}"
-                print(f"[webhook] ERROR: {result}")
-
-            # Hook: after tool execution (fires for success AND error)
-            if client._on_tool_result:
-                try:
-                    client._on_tool_result(tool_name, arguments, result)
-                except Exception as e:
-                    print(f"[webhook] WARNING: on_tool_result hook failed: {e}")
-
-            return str(result)
-
-        config = uvicorn.Config(
-            cls._app, host="0.0.0.0", port=cls._port,
-            log_level="error", lifespan="off",
-        )
-        cls._server = uvicorn.Server(config)
-        cls._server_task = asyncio.create_task(cls._server.serve())
-        await asyncio.sleep(0.5)
-
-    @classmethod
-    def _find_free_port(cls):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
-
-    @classmethod
     async def stop(cls):
         if cls._http:
             await cls._http.aclose()
             cls._http = None
-        if cls._server:
-            cls._server.should_exit = True
-            if cls._server_task:
-                try:
-                    await cls._server_task
-                except asyncio.CancelledError:
-                    pass
-                cls._server_task = None
-            cls._server = None
-            cls._port = None
         cls._clients.clear()

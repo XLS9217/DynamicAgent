@@ -1,7 +1,8 @@
 import asyncio
+import json
+import re
 import time
 import uuid
-import httpx
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
@@ -15,26 +16,44 @@ from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 logger = get_my_logger()
 
+def _sanitize_json(raw: str) -> str:
+    """Fix common LLM JSON quirks like leading zeros (e.g. 00.5 -> 0.5)."""
+    return re.sub(r'(?<![0-9])0+(\d+\.)', r'\1', raw)
+
+
+def _tool_arguments_to_object(raw: str | dict | None) -> dict:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        arguments = json.loads(_sanitize_json(raw or "{}"))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        logger.warning("Failed to parse tool arguments as JSON: %s", raw)
+        return {}
+    if not isinstance(arguments, dict):
+        return {}
+    return arguments
+
 
 class RealtimeSession:
-
-    _http: httpx.AsyncClient = None
-
-    @classmethod
-    def _get_http(cls) -> httpx.AsyncClient:
-        if cls._http is None:
-            cls._http = httpx.AsyncClient(mounts={"http://": None})
-        return cls._http
-
-    def __init__(self, setting: str, webhook_url: str, reconnect_keep: int = 30, session_id: str = None):
+    def __init__(self, setting: str, reconnect_keep: int = 30, session_id: str = None):
         self.session_id = session_id or str(uuid.uuid4())
         self.setting = setting
-        self.webhook_url = webhook_url
         self.reconnect_keep = reconnect_keep
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
         self.session_logger = SessionLogger(self.session_id)
+        self.active_trigger_task: asyncio.Task | None = None
+
+    @property
+    def state(self) -> str:
+        if self.agi is None:
+            return "idle"
+        if self.active_trigger_task is not None and not self.active_trigger_task.done() and self.agi.state == "idle":
+            return "running"
+        return self.agi.state
 
     # ===== Redis-backed session state (keys owned here, not in RedisInstance) =====
 
@@ -58,30 +77,16 @@ class RealtimeSession:
         return RagCache.model_validate_json(raw) if raw else None
 
     async def agent_setup(self):
-
-        async def tool_execute(tool_call: AgentToolCall) -> str:
-            """POST tool_call to client webhook and return result."""
-            payload = tool_call.model_dump()
-            payload["session_id"] = self.session_id
-            resp = await self._get_http().post(
-                self.webhook_url,
-                json=payload,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.text
-
         self.agi = await AgentGeneralInterface.create(
             language_engine=None,
             setting=self.setting,
-            tool_execute=tool_execute,
+            send_tool_calls=self._send_tool_calls,
             session_logger=self.session_logger,
         )
         logger.info("AGI initialized for session %s", self.session_id)
         self.session_logger.log_system("agent_setup", {
             "session_id": self.session_id,
             "setting": self.setting,
-            "webhook_url": self.webhook_url,
             "reconnect_keep": self.reconnect_keep,
         })
 
@@ -100,9 +105,11 @@ class RealtimeSession:
             await self.client.send_json(chunk.model_dump())
 
         self.agi._stream_callback = stream_callback
+        if self.agi.state == "gathering_tool_result" and self.agi.pending_tool_calls:
+            await self._send_tool_calls(list(self.agi.pending_tool_calls.values()))
 
     def register_operator(self, operator_data: dict):
-        """Forward the serialized operator data to AGI for registration."""
+        """Forward serialized operator data to AGI for registration."""
         self.agi.register_operator(operator_data)
         self.session_logger.log_system("operator_registered", {"operator_name": operator_data.get("name")})
 
@@ -125,37 +132,43 @@ class RealtimeSession:
         """Trigger agent with text input. Response streams via WebSocket."""
         if self.client is None:
             raise RuntimeError("WebSocket not connected")
+        if self.agi.state != "idle":
+            raise RuntimeError(f"Agent is {self.agi.state}")
 
-        # Start processing in background, return immediately
-        asyncio.create_task(self._process_trigger(text, bucket_name))
-
-    async def _process_trigger(self, text: str, bucket_name: str = None):
-        """Background task to process trigger and stream response."""
         try:
             message = {"type": "invoke", "text": text}
 
             # Fetch history before this turn's message
             history = await self.load_messages()
 
-            # Trigger agent with history; AGI is stateless about history
-            assistant_text, retrieved_knowledge = await self.agi.trigger(message, history=history, bucket_name=bucket_name)
-
-            # Persist this turn to Redis
-            await self.append_message("user", text)
-            if assistant_text:
-                await self.append_message("assistant", assistant_text)
-
-            # Cache RAG retrieval for monitor access (fetched by session_id)
-            if retrieved_knowledge:
-                await self.set_rag(RagCache(query=text, knowledge=retrieved_knowledge, retrieved_at=time.time()))
-
-            # Send final chunk
-            final_chunk = AgentResponseChunk(type="agent_chunk", text="", finished=True, invoked=True)
-            await self.client.send_json(final_chunk.model_dump())
+            # Trigger agent with history; AGI owns the in-progress invoke state.
+            await self.agi.trigger(
+                message,
+                history=history,
+                bucket_name=bucket_name,
+            )
         except Exception as e:
             logger.error("Error processing trigger: %s", e)
             error_chunk = AgentResponseChunk(type="agent_chunk", text="Error Occurred", finished=True, invoked=True)
-            await self.client.send_json(error_chunk.model_dump())
+            if self.client is not None:
+                await self.client.send_json(error_chunk.model_dump())
+        finally:
+            self.active_trigger_task = None
+
+    async def receive_tool_result(self, tool_call_id: str, ok: bool, result: object) -> None:
+        await self.agi.append_tool_result(tool_call_id=tool_call_id, ok=ok, result=result)
+
+    async def _send_tool_calls(self, tool_calls: list[AgentToolCall]) -> None:
+        if self.client is None:
+            return
+        for tool_call in tool_calls:
+            await self.client.send_json({
+                "type": "tool_call",
+                "session_id": self.session_id,
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "arguments": _tool_arguments_to_object(tool_call.arguments),
+            })
 
 
 class RealtimeSessionManager:
@@ -163,10 +176,9 @@ class RealtimeSessionManager:
     _cleanup_task: asyncio.Task | None = None
 
     @classmethod
-    async def create(cls, request: CreateSessionRequest, webhook_url: str) -> RealtimeSession:
+    async def create(cls, request: CreateSessionRequest) -> RealtimeSession:
         session = RealtimeSession(
             setting=request.setting,
-            webhook_url=webhook_url,
             reconnect_keep=request.reconnect_keep,
             session_id=request.session_id,
         )

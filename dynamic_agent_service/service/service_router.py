@@ -1,10 +1,12 @@
+import asyncio
+
 from fastapi import APIRouter, WebSocket, HTTPException, Request
 from pydantic import BaseModel
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
 from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
-from dynamic_agent_service.service.service_structs import CreateSessionRequest
+from dynamic_agent_service.service.service_structs import CreateSessionRequest, ToolResultRequest
 from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
@@ -14,8 +16,7 @@ router = APIRouter()
 
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
-    webhook_url = f"http://{request.client.host}:{body.webhook_port}/webhook"
-    session = await RealtimeSessionManager.create(request=body, webhook_url=webhook_url)
+    session = await RealtimeSessionManager.create(request=body)
     await session.agent_setup()
 
     scheme = request.headers.get("x-forwarded-proto", "http")
@@ -24,6 +25,22 @@ async def create_session(body: CreateSessionRequest, request: Request):
 
     messages = await session.load_messages()
     return {"session_id": session.session_id, "socket_url": socket_url, "messages": messages}
+
+
+@router.post("/tool_result")
+async def tool_result(body: ToolResultRequest):
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        await session.receive_tool_result(
+            tool_call_id=body.tool_call_id,
+            ok=body.ok,
+            result=body.result,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"status": "ok"}
 
 
 @router.websocket("/agent_session")
@@ -78,7 +95,9 @@ async def trigger(body: TriggerRequest):
     session = RealtimeSessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    await session.trigger_agent(body.text, bucket_name=body.bucket_name)
+    if session.state != "idle":
+        raise HTTPException(status_code=409, detail=f"Session is {session.state}")
+    session.active_trigger_task = asyncio.create_task(session.trigger_agent(body.text, bucket_name=body.bucket_name))
     return {"status": "accepted"}
 
 

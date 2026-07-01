@@ -7,7 +7,6 @@ from dynamic_agent_service.agent.agent_structs import AgentToolCall
 class CreateSessionRequest(BaseModel):
     # Session
     setting: str
-    webhook_port: int
     reconnect_keep: int = 30
     session_id: Optional[str] = None  # provided to resume an existing session
 
@@ -22,10 +21,11 @@ class AgentResponseChunk(BaseModel):
     finished: bool = False
     invoked: bool = False
 
-class ToolExecuteResult(BaseModel):
-    type: Literal["tool_execute_result"]
+class ToolResultRequest(BaseModel):
+    session_id: str
     tool_call_id: str
-    content: str
+    ok: bool = True
+    result: object
 
 
 # ===== Redis-backed session state =====
@@ -38,7 +38,6 @@ class SessionMeta(BaseModel):
     """Core session metadata. Stored at session:{session_id}:meta."""
     session_id: str
     setting: str
-    webhook_url: str
     reconnect_keep: int
     bucket_name: Optional[str] = None
     created_at: float  # Unix timestamp

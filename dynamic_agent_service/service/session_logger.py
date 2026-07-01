@@ -13,9 +13,13 @@ class SessionLogger:
 
     def __init__(self, session_id: str):
         self.session_id = session_id
-        cache_folder = os.getenv("CACHE_DIR")
+        cache_folder = os.getenv("CACHE_DIR") or ".cache"
         self.log_dir = Path(cache_folder) / "session_log" / session_id
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            self.log_dir = Path.cwd() / ".cache" / "session_log" / session_id
+            self.log_dir.mkdir(parents=True, exist_ok=True)
         self._current_invoke_file = None
         self._write_queue = asyncio.Queue()
         self._writer_task = None

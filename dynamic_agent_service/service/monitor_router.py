@@ -28,7 +28,6 @@ async def _session_summary(session: RealtimeSession) -> dict:
     return {
         "session_id": session.session_id,
         "setting": session.setting,
-        "webhook_url": session.webhook_url,
         "reconnect_keep": session.reconnect_keep,
         "disconnect_time": session.disconnect_time,
         "connected": session.client is not None and session.disconnect_time is None,

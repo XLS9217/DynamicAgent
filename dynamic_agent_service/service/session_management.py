@@ -102,6 +102,10 @@ class RealtimeSession:
         MonitorEventHub.publish_nowait("session_join", session_event_payload(self))
 
         async def stream_callback(chunk: AgentResponseChunk):
+            if chunk.finished and self.agi is not None:
+                assistant_text = self.agi.accumulated_assistant_text
+                if assistant_text:
+                    await self.append_message("assistant", assistant_text)
             await self.client.send_json(chunk.model_dump())
 
         self.agi._stream_callback = stream_callback
@@ -140,6 +144,7 @@ class RealtimeSession:
 
             # Fetch history before this turn's message
             history = await self.load_messages()
+            await self.append_message("user", text)
 
             # Trigger agent with history; AGI owns the in-progress invoke state.
             await self.agi.trigger(

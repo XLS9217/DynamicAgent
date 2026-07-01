@@ -61,6 +61,10 @@ class AgentGeneralInterface:
         self._full_assistant_text = ""
         self._retrieved_knowledge: list[dict] | None = None
 
+    @property
+    def accumulated_assistant_text(self) -> str:
+        return self._full_assistant_text
+
     @classmethod
     async def create(
             cls,
@@ -304,11 +308,6 @@ class AgentGeneralInterface:
                     for flow_name, flow_content in flow_dict.items():
                         lines.append(f"### {flow_name}:")
                         lines.append(flow_content)
-
-            lines.append("## Tools:")
-            for tool in operator.get("tools", []):
-                func = tool.get("function", {})
-                lines.append(f"- {func.get('name', '')}: {func.get('description', '')}")
 
             menus.append("\n".join(lines))
 

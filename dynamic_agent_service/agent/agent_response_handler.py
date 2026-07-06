@@ -1,11 +1,42 @@
 from typing import Callable
 
+from openai import APIError
+
 from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger()
+
+DATA_INSPECTION_ERROR_MARKER = "DataInspectionFailed"
+SAFETY_RETRY_INSTRUCTION = (
+    "The previous response may have been rejected by the model provider's safety "
+    "inspection. Answer safely and briefly. Avoid explicit, violent, hateful, "
+    "sexual, or otherwise sensitive details. If the request cannot be answered "
+    "safely, refuse briefly and offer a safe alternative."
+)
+DATA_INSPECTION_FALLBACK = (
+    "I couldn't complete that response because the model provider rejected the "
+    "generated output during safety inspection. Please rephrase the request or "
+    "remove sensitive details and try again."
+)
+
+
+def _is_data_inspection_failed(exc: Exception) -> bool:
+    return isinstance(exc, APIError) and DATA_INSPECTION_ERROR_MARKER in str(exc)
+
+
+def _with_safety_retry_instruction(messages: list) -> list:
+    retry_messages = [dict(message) for message in messages]
+    if retry_messages and retry_messages[0].get("role") == "system":
+        retry_messages[0]["content"] = (
+            f"{retry_messages[0].get('content', '')}\n\n"
+            f"Additional safety instruction:\n{SAFETY_RETRY_INSTRUCTION}"
+        )
+    else:
+        retry_messages.insert(0, {"role": "system", "content": SAFETY_RETRY_INSTRUCTION})
+    return retry_messages
 
 
 class AgentResponseHandler:
@@ -90,4 +121,26 @@ class AgentResponseHandler:
         :param stream_callback: Async callback for content chunks
         :return: AgentInvokeResponse with full text and tool calls
         """
-        return await self._stream_response_flow(messages, tools, stream_callback)
+        try:
+            return await self._stream_response_flow(messages, tools, stream_callback)
+        except Exception as exc:
+            if not _is_data_inspection_failed(exc):
+                raise
+
+            logger.warning("LLM output rejected by provider inspection: %s", exc)
+
+        try:
+            return await self._stream_response_flow(
+                _with_safety_retry_instruction(messages),
+                tools,
+                stream_callback,
+            )
+        except Exception as exc:
+            if not _is_data_inspection_failed(exc):
+                raise
+
+            logger.warning("LLM safety retry rejected by provider inspection: %s", exc)
+
+            if stream_callback:
+                await stream_callback(AgentResponseChunk(type="agent_chunk", text=DATA_INSPECTION_FALLBACK))
+            return AgentInvokeResult(full_text=DATA_INSPECTION_FALLBACK, tool_calls=[])

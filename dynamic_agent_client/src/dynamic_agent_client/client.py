@@ -2,6 +2,7 @@
 This acts as a final wrapper to user
 """
 import asyncio
+import inspect
 import json
 from typing import Callable
 
@@ -98,6 +99,8 @@ class DynamicAgentClient:
                 except Exception as exc:
                     print(f"[tool_call] WARNING: on_tool_call hook failed: {exc}")
             result = callable_func(**arguments)
+            if inspect.isawaitable(result):
+                result = await result
         except KeyError:
             ok = False
             result = f"Tool not found: {llm_tool_name}"
@@ -227,6 +230,11 @@ class DynamicAgentClient:
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
         """Retrieve knowledge from a bucket."""
         return await ServiceHandler.retrieve(query, bucket_name, top_k)
+
+    @classmethod
+    async def expand_node_ids(cls, bucket_name: str, node_ids: list[str]):
+        """Expand knowledge node IDs into their stored values."""
+        return await ServiceHandler.expand_node_ids(bucket_name, node_ids)
 
     async def _ensure_connected(self):
         """Ensure websocket is connected, reconnect if needed."""

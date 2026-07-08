@@ -188,3 +188,16 @@ async def knowledge_retrieve(body: KnowledgeRetrieveRequest):
         score_threshold=body.score_threshold
     )
     return {"status": "ok", "results": results}
+
+
+class KnowledgeExpandRequest(BaseModel):
+    bucket_name: str
+    node_ids: list[str]
+
+@router.post("/knowledge/expand")
+async def knowledge_expand(body: KnowledgeExpandRequest):
+    results = await KnowledgeInterface.expand_node_ids(
+        bucket_name=body.bucket_name,
+        node_ids=body.node_ids,
+    )
+    return {"status": "ok", "results": results}

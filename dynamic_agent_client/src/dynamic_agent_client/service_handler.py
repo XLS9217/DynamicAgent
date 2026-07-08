@@ -204,6 +204,19 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
+    async def expand_node_ids(cls, bucket_name: str, node_ids: list[str]):
+        """Expand knowledge node IDs via HTTP POST."""
+        resp = await cls._http.post(
+            f"{cls._server_addr}/knowledge/expand",
+            json={
+                "bucket_name": bucket_name,
+                "node_ids": node_ids,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @classmethod
     async def reconnect_session(cls, session_id: str):
         """Reconnect to existing session by session_id, returns websocket."""
         socket_url = f"{cls._server_addr.replace('http', 'ws')}/agent_session?session_id={session_id}"

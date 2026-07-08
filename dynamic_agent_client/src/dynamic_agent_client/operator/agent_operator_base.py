@@ -2,7 +2,7 @@
 import inspect
 import re
 from abc import ABC
-from typing import Callable, get_type_hints
+from typing import Callable, get_args, get_origin, get_type_hints
 from logging import getLogger
 
 from pydantic import BaseModel
@@ -45,13 +45,18 @@ def _build_schema(func: Callable, description: str) -> dict:
 
         param_type = type_hints.get(param_name, str)
 
-        json_type = "string"
-        if param_type in (int, float):
-            json_type = "number"
-        elif param_type is bool:
-            json_type = "boolean"
+        origin = get_origin(param_type)
+        args = get_args(param_type)
 
-        prop_schema = {"type": json_type}
+        if origin is list and args and args[0] is str:
+            prop_schema = {"type": "array", "items": {"type": "string"}}
+        else:
+            json_type = "string"
+            if param_type in (int, float):
+                json_type = "number"
+            elif param_type is bool:
+                json_type = "boolean"
+            prop_schema = {"type": json_type}
         if param_name in param_descriptions:
             prop_schema["description"] = param_descriptions[param_name]
 

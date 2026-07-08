@@ -136,3 +136,19 @@ class KnowledgeInterface:
             knowledge_accessor=KnowledgeAccessor
         )
         return await retrieve_wf.execute()
+
+    @classmethod
+    async def expand_node_ids(cls, bucket_name: str, node_ids: list[str]):
+        """
+        Expand knowledge node IDs into their stored values.
+
+        Args:
+            bucket_name: Bucket to search in
+            node_ids: Knowledge node IDs to expand
+
+        Returns:
+            List of knowledge node records with kn_id, instance_id, and value
+        """
+        if not node_ids:
+            return []
+        return KnowledgeAccessor.get_by_ids(bucket_name, node_ids)

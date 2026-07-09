@@ -25,7 +25,7 @@ class RagOperator(AgentOperator):
             "3. Answer from retrieved or expanded knowledge instead of guessing."
         )
 
-    @agent_tool(description="Retrieve relevant knowledge for the user's query from the configured bucket.")
+    @agent_tool(description="Retrieve relevant knowledge for the user's query from the configured bucket.", count_limit=2)
     async def retrieve(self, query: str):
         """
         Retrieve relevant knowledge.

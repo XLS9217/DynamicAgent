@@ -150,7 +150,6 @@ class RealtimeSession:
             await self.agi.trigger(
                 message,
                 history=history,
-                bucket_name=bucket_name,
             )
         except Exception as e:
             logger.error("Error processing trigger: %s", e)

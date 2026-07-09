@@ -20,6 +20,13 @@ def _sanitize_json(raw: str) -> str:
     return re.sub(r'(?<![0-9])0+(\d+\.)', r'\1', raw)
 
 
+def _make_operator_tool_callable(operator, tool_name: str):
+    def call_tool(**arguments):
+        return operator.execute(tool_name, arguments)
+
+    return call_tool
+
+
 class ServiceHandler:
     """
     Class-only singleton.
@@ -79,9 +86,9 @@ class ServiceHandler:
         """
         serialized = operator.get_serialized_operator()
 
-        for tool_name, tool_info in operator._tools.items():
+        for tool_name in operator._tools:
             prefixed_name = f"{serialized.name}_{tool_name}"
-            client.tool_map[prefixed_name] = tool_info["callable"]
+            client.tool_map[prefixed_name] = _make_operator_tool_callable(operator, tool_name)
 
         resp = await cls._http.post(
             f"{cls._server_addr}/agent_operator",
@@ -199,6 +206,7 @@ class ServiceHandler:
                 "bucket_name": bucket_name,
                 "top_k": top_k,
             },
+            timeout=120.0,
         )
         resp.raise_for_status()
         return resp.json()

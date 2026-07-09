@@ -31,6 +31,7 @@ class DynamicAgentClient:
         self._needs_reconnect = True
 
         self.tool_map = {}  # {prefixed_tool_name: callable}
+        self._operators: list[AgentOperator] = []
 
     @classmethod
     async def connect(cls, server_addr: str):
@@ -137,6 +138,8 @@ class DynamicAgentClient:
         self._accumulated_text = ""
         self._invoke_text = ""
         self._response_done.clear()
+        for operator in self._operators:
+            operator.reset_tool_counters()
 
         # Fire HTTP trigger, response streams via WebSocket
         await ServiceHandler.trigger(self.session_id, text, bucket_name=bucket_name)
@@ -149,7 +152,9 @@ class DynamicAgentClient:
     async def add_operator(self, operator):
         if not isinstance(operator, AgentOperator):
             raise TypeError("operator must be an AgentOperator instance")
-        return await ServiceHandler.add_operator(self.session_id, self, operator)
+        result = await ServiceHandler.add_operator(self.session_id, self, operator)
+        self._operators.append(operator)
+        return result
 
     @classmethod
     async def delete_session(cls, session_id: str) -> bool:

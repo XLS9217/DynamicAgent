@@ -76,11 +76,16 @@ def _build_schema(func: Callable, description: str) -> dict:
     }
 
 
-def agent_tool(description: str = ""):
+def agent_tool(description: str = "", count_limit: int | None = None, max_calls_per_trigger: int | None = None):
     """
     Decorator to mark a method as an agent tool.
     Only works on class methods (must have self as first param).
     """
+    if count_limit is not None and count_limit < 1:
+        raise ValueError("count_limit must be greater than 0")
+    if max_calls_per_trigger is not None and max_calls_per_trigger < 1:
+        raise ValueError("max_calls_per_trigger must be greater than 0")
+
     def decorator(func: Callable) -> Callable:
         sig = inspect.signature(func)
         params = list(sig.parameters.keys())
@@ -89,6 +94,7 @@ def agent_tool(description: str = ""):
             raise ValueError("@agent_tool can only decorate class methods")
 
         func._agent_tool_schema = _build_schema(func, description)
+        func._agent_tool_count_limit = count_limit if count_limit is not None else max_calls_per_trigger
         return func
 
     return decorator
@@ -138,6 +144,7 @@ class AgentOperator(ABC):
 
     def __init__(self):
         self._tools: dict[str, dict] = {}
+        self._tool_call_counts: dict[str, int] = {}
         self._description_func = None
         self._flow_funcs: list[tuple[str, Callable]] = []
         self._collect_tools()
@@ -163,7 +170,9 @@ class AgentOperator(ABC):
                 self._tools[name] = {
                     "schema": func._agent_tool_schema,
                     "callable": attr,
+                    "count_limit": getattr(func, "_agent_tool_count_limit", None),
                 }
+                self._tool_call_counts[name] = 0
                 logger.info(f"Collected tool: {name}")
 
             elif hasattr(func, '_is_operator_description'):
@@ -201,5 +210,21 @@ class AgentOperator(ABC):
         if tool_name not in self._tools:
             raise ValueError(f"Tool {tool_name} not found in operator")
 
-        callable_func = self._tools[tool_name]["callable"]
+        tool_info = self._tools[tool_name]
+        count_limit = tool_info.get("count_limit")
+        current_count = self._tool_call_counts.get(tool_name, 0)
+        if count_limit is not None and current_count >= count_limit:
+            return (
+                f"Tool use limit reached for {self.__class__.__name__}.{tool_name}: "
+                f"maximum {count_limit} call(s) per trigger. Do not call this tool again in this trigger; "
+                "answer with the information already available or explain what could not be retrieved."
+            )
+
+        self._tool_call_counts[tool_name] = current_count + 1
+        callable_func = tool_info["callable"]
         return callable_func(**arguments)
+
+    def reset_tool_counters(self) -> None:
+        """Reset per-trigger tool call counters."""
+        for tool_name in self._tools:
+            self._tool_call_counts[tool_name] = 0

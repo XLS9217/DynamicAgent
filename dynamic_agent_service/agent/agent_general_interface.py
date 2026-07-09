@@ -9,7 +9,6 @@ from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
-from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 
 logger = get_my_logger()
 
@@ -27,11 +26,6 @@ Rules:
 
 OPERATOR_MESSAGE_TEMPLATE = """Here are the available operators you can use:
 {operator_menu}
-"""
-
-RAG_MESSAGE_TEMPLATE = """Here is the retrieved knowledge relevant to the conversation:
-{rag_result}
-Use it to respond to the user.
 """
 
 class AgentGeneralInterface:
@@ -59,7 +53,6 @@ class AgentGeneralInterface:
         self._operator_list: list[dict] = []
         self._debug_writer: DebugTriggerWriter | None = None
         self._full_assistant_text = ""
-        self._retrieved_knowledge: list[dict] | None = None
 
     @property
     def accumulated_assistant_text(self) -> str:
@@ -85,7 +78,6 @@ class AgentGeneralInterface:
         self,
         message: dict,
         history: list = None,
-        bucket_name: str = None,
     ) -> None:
         if self.state != "idle":
             raise RuntimeError(f"Agent is {self.state}")
@@ -94,21 +86,9 @@ class AgentGeneralInterface:
         self._running_message_list = []
         self._debug_writer = DebugTriggerWriter()
         self._full_assistant_text = ""
-        self._retrieved_knowledge = None
-
-        # RAG: Retrieve knowledge before answering
-        if bucket_name:
-            user_query = message.get("text", "")
-            self._retrieved_knowledge = await KnowledgeInterface.retrieve(
-                query=user_query,
-                bucket_name=bucket_name,
-                top_k=10
-            )
-            logger.info(f"Retrieved {len(self._retrieved_knowledge)} knowledge instances")
 
         self._running_message_list = await self._forge_message_list(
             message.get("text", ""),
-            self._retrieved_knowledge,
             history,
         )
 
@@ -121,8 +101,6 @@ class AgentGeneralInterface:
         self._session_logger.invoke_log({"type": "system_prompt", "content": self._running_message_list[0]["content"]})
         self._session_logger.invoke_log({"type": "tools", "tools": self._parse_tool_list()})
         self._session_logger.invoke_log({"type": "conversation_history", "messages": self._running_message_list[1:]})
-        if self._retrieved_knowledge:
-            self._session_logger.invoke_log({"type": "rag_retrieved", "knowledge": self._retrieved_knowledge})
 
         await self.invoke()
 
@@ -247,7 +225,6 @@ class AgentGeneralInterface:
         self._running_message_list = []
         self._debug_writer = None
         self._full_assistant_text = ""
-        self._retrieved_knowledge = None
         self.state = "idle"
 
     def _log_system(self, event: str, data: dict = None) -> None:
@@ -271,21 +248,13 @@ class AgentGeneralInterface:
             ]
         }
 
-    async def _forge_message_list(self, user_message: str, retrieved_knowledge: list[dict] | None = None, history: list | None = None) -> list:
+    async def _forge_message_list(self, user_message: str, history: list | None = None) -> list:
         system_content = SYSTEM_MESSAGE_TEMPLATE.format(setting=self._setting)
         messages = [{"role": "system", "content": system_content}]
 
         operator_menu = self._get_operator_menu()
         if operator_menu:
             messages.append({"role": "user", "content": OPERATOR_MESSAGE_TEMPLATE.format(operator_menu=operator_menu)})
-
-        if retrieved_knowledge:
-            rag_result = ""
-            for i, instance in enumerate(retrieved_knowledge, 1):
-                rag_result += f"\n--- Knowledge {i} ---\n"
-                for attr_name, attr_value in instance.items():
-                    rag_result += f"{attr_name}: {attr_value}\n"
-            messages.append({"role": "user", "content": RAG_MESSAGE_TEMPLATE.format(rag_result=rag_result)})
 
         messages.extend(history or [])
         messages.append({"role": "user", "content": user_message})

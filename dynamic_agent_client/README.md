@@ -33,6 +33,38 @@ Then:
 from dynamic_agent_client import ...
 ```
 
+## Sessions
+
+Sessions keep conversation messages in Redis by default. This supports reconnects
+and shared access from service instances without writing chat history to
+PostgreSQL. After the disconnected session's reconnect window, session cleanup
+removes both the in-process session and its Redis history, so smoke tests require
+no manual deletion.
+
+```python
+client = await DynamicAgentClient.create("You are a concise assistant.")
+```
+
+For durable history, set `persist=True`. Save the generated session ID and pass
+it to `create` later with the same option to resume the conversation:
+
+```python
+await DynamicAgentClient.connect("http://localhost:7777")
+
+client = await DynamicAgentClient.create(
+    "You are a concise assistant.",
+    persist=True,
+)
+session_id = client.session_id
+await client.close()
+
+client = await DynamicAgentClient.create(
+    "You are a concise assistant.",
+    session_id=session_id,
+    persist=True,
+)
+```
+
 ## Using operators
 
 Operators expose client-side Python functions as tools the agent can call during

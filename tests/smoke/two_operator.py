@@ -2,8 +2,7 @@
 Smoke test two registered operators with separate weather and body-temperature tools.
 
 The script creates random city/weather and Celsius-temperature cases, asks the
-agent to use both operators in one session, verifies both operator methods ran
-with expected values, then deletes the deterministic test session.
+agent to use both operators in one ephemeral session, and verifies both methods.
 """
 import asyncio
 import os
@@ -16,9 +15,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 from dynamic_agent_client import DynamicAgentClient, AgentOperator, agent_tool, description, flow
 from dynamic_agent_client.service_handler import ServiceHandler
-from dynamic_agent_service.external_service.pg_instance import PgInstance
-from dynamic_agent_service.external_service.redis_instance import RedisInstance
-from dynamic_agent_service.service.session_accessor import SessionAccessor
 
 load_dotenv()
 
@@ -118,15 +114,10 @@ def build_temperature_case() -> tuple[float, dict]:
 
 
 async def main():
-    await PgInstance.initialize()
-    await RedisInstance.initialize()
-
     client = None
     tool_calls = []
 
     try:
-        await SessionAccessor.delete_session(SESSION_ID)
-
         weather_reports, target_city = build_weather_case()
         body_celsius, expected_temperature = build_temperature_case()
         expected_weather = weather_reports[target_city]
@@ -145,6 +136,7 @@ async def main():
                 "body-temperature tasks. Do not invent weather or temperature calculations."
             ),
             session_id=SESSION_ID,
+            persist=False,
         )
         assert client.session_id == SESSION_ID
         assert client.messages == [], "fresh smoke session should start empty"
@@ -192,9 +184,6 @@ async def main():
         if client is not None:
             await client.close()
 
-        await SessionAccessor.delete_session(SESSION_ID)
-        await PgInstance.close()
-        await RedisInstance.close()
         await ServiceHandler.stop()
 
 

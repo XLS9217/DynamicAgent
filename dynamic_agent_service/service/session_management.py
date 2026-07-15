@@ -37,10 +37,17 @@ def _tool_arguments_to_object(raw: str | dict | None) -> dict:
 
 
 class RealtimeSession:
-    def __init__(self, setting: str, reconnect_keep: int = 30, session_id: str = None):
+    def __init__(
+        self,
+        setting: str,
+        reconnect_keep: int = 30,
+        session_id: str = None,
+        persist: bool = False,
+    ):
         self.session_id = session_id or str(uuid.uuid4())
         self.setting = setting
         self.reconnect_keep = reconnect_keep
+        self.persist = persist
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
@@ -61,10 +68,18 @@ class RealtimeSession:
         return f"session:{self.session_id}:rag"
 
     async def append_message(self, role: str, content: str) -> None:
-        await SessionAccessor.append_message(self.session_id, role, content)
+        await SessionAccessor.append_message(
+            self.session_id,
+            role,
+            content,
+            durable=self.persist,
+        )
 
     async def load_messages(self) -> list[dict]:
-        messages = await SessionAccessor.load_messages(self.session_id)
+        messages = await SessionAccessor.load_messages(
+            self.session_id,
+            durable=self.persist,
+        )
         return [m.model_dump() for m in messages]
 
     async def set_rag(self, rag: RagCache) -> None:
@@ -185,6 +200,7 @@ class RealtimeSessionManager:
             setting=request.setting,
             reconnect_keep=request.reconnect_keep,
             session_id=request.session_id,
+            persist=request.persist,
         )
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()
@@ -204,13 +220,17 @@ class RealtimeSessionManager:
         MonitorEventHub.publish_nowait("session_leave", session_event_payload(session))
 
     @classmethod
-    def cleanup_expired(cls):
-        """Remove sessions that have been disconnected longer than reconnect_keep."""
+    async def cleanup_expired(cls):
+        """Remove expired sessions from process memory and Redis."""
         expired = [sid for sid, session in cls._sessions.items() if session.is_expired()]
         for sid in expired:
             session = cls._sessions.pop(sid, None)
             logger.info("Session %s expired and removed", sid)
             if session is not None:
+                try:
+                    await SessionAccessor.delete_cached_messages(sid)
+                except Exception as exc:
+                    logger.warning("Failed to remove Redis messages for expired session %s: %s", sid, exc)
                 MonitorEventHub.publish_nowait("session_expired", session_event_payload(session))
 
     @classmethod
@@ -224,4 +244,4 @@ class RealtimeSessionManager:
         """Background task that runs cleanup_expired every 10 seconds."""
         while True:
             await asyncio.sleep(10)
-            cls.cleanup_expired()
+            await cls.cleanup_expired()

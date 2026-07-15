@@ -2,8 +2,8 @@
 Smoke test one registered operator with a random linear algebra task.
 
 The script builds a random integer matrix/vector case, computes the expected
-matrix-vector product locally, asks the agent to use the operator, verifies the
-operator method executed with the same result, then deletes the test session.
+matrix-vector product locally, asks the agent to use the operator, and verifies
+the operator method executed with the same result in an ephemeral session.
 """
 import asyncio
 import os
@@ -16,9 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 from dynamic_agent_client import DynamicAgentClient, AgentOperator, agent_tool, description, flow
 from dynamic_agent_client.service_handler import ServiceHandler
-from dynamic_agent_service.external_service.pg_instance import PgInstance
-from dynamic_agent_service.external_service.redis_instance import RedisInstance
-from dynamic_agent_service.service.session_accessor import SessionAccessor
 
 load_dotenv()
 
@@ -65,15 +62,10 @@ def build_case() -> tuple[list[list[int]], list[int], list[int]]:
 
 
 async def main():
-    await PgInstance.initialize()
-    await RedisInstance.initialize()
-
     client = None
     tool_calls = []
 
     try:
-        await SessionAccessor.delete_session(SESSION_ID)
-
         matrix, vector, expected = build_case()
         print(f"matrix: {matrix}")
         print(f"vector: {vector}")
@@ -88,6 +80,7 @@ async def main():
                 "Do not calculate matrix operations mentally."
             ),
             session_id=SESSION_ID,
+            persist=False,
         )
         assert client.session_id == SESSION_ID
         assert client.messages == [], "fresh smoke session should start empty"
@@ -116,9 +109,6 @@ async def main():
         if client is not None:
             await client.close()
 
-        await SessionAccessor.delete_session(SESSION_ID)
-        await PgInstance.close()
-        await RedisInstance.close()
         await ServiceHandler.stop()
 
 

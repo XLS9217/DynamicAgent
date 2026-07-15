@@ -51,7 +51,14 @@ class ServiceHandler:
             cls._http = _make_httpx_client()
 
     @classmethod
-    async def create_session(cls, setting: str, client, reconnect_keep: int = 30, session_id: str = None) -> tuple:
+    async def create_session(
+        cls,
+        setting: str,
+        client,
+        reconnect_keep: int = 30,
+        session_id: str = None,
+        persist: bool = False,
+    ) -> tuple:
         """
         POST /create_session to the service, register client, return (session_id, websocket, messages).
         """
@@ -61,6 +68,7 @@ class ServiceHandler:
                 "setting": setting,
                 "reconnect_keep": reconnect_keep,
                 "session_id": session_id,
+                "persist": persist,
             },
         )
         resp.raise_for_status()

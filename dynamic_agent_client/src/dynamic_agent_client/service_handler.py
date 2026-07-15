@@ -198,7 +198,7 @@ class ServiceHandler:
 
     @classmethod
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
-        """Retrieve knowledge from a bucket via HTTP POST."""
+        """Retrieve knowledge from a bucket via HTTP POST. Returns (results, analytics)."""
         resp = await cls._http.post(
             f"{cls._server_addr}/knowledge/retrieve",
             json={
@@ -209,7 +209,8 @@ class ServiceHandler:
             timeout=120.0,
         )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        return data.get("results", data), data.get("analytics", {})
 
     @classmethod
     async def expand_node_ids(cls, bucket_name: str, node_ids: list[str]):

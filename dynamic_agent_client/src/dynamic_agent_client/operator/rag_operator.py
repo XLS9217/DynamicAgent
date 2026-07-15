@@ -32,12 +32,12 @@ class RagOperator(AgentOperator):
 
         :param query: The user's question or search query.
         """
-        response = await ServiceHandler.retrieve(
+        results, _analytics = await ServiceHandler.retrieve(
             query=query,
             bucket_name=self.bucket_name,
             top_k=self.top_k,
         )
-        return response.get("results", response)
+        return results
 
     @agent_tool(description="Expand multiple knowledge node IDs from <node_id>...</node_id> placeholders.")
     async def expand_node_ids(self, node_ids: list[str]):

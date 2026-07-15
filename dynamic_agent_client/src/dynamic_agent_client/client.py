@@ -233,7 +233,7 @@ class DynamicAgentClient:
 
     @classmethod
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
-        """Retrieve knowledge from a bucket."""
+        """Retrieve knowledge from a bucket. Returns (results, analytics)."""
         return await ServiceHandler.retrieve(query, bucket_name, top_k)
 
     @classmethod

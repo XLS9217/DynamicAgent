@@ -29,10 +29,11 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         self.query = ""
         self.bucket_name = ""
         self.top_k = 10
-        self.score_threshold = 0.3
+        self.score_threshold = 0.15
         self.knowledge_accessor = None
         self._embedding_weight = 0.5
         self._bm25_weight = 0.5
+        self._similarity_focus = "neutral"
 
     async def build(self, query: str, bucket_name: str, top_k: int = 10, score_threshold: float = 0.3, knowledge_accessor=None):
         self.query = query
@@ -59,20 +60,24 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
             decision = response.strip().lower()
 
             if decision == "embedding":
+                self._similarity_focus = "embedding"
                 self._embedding_weight = 0.75
                 self._bm25_weight = 0.25
                 self.append_log(f"Decision: embedding (weights: ebd=0.75, bm25=0.25)")
             elif decision == "bm25":
+                self._similarity_focus = "bm25"
                 self._embedding_weight = 0.25
                 self._bm25_weight = 0.75
                 self.append_log(f"Decision: bm25 (weights: ebd=0.25, bm25=0.75)")
             else:
                 # neutral or any other response
+                self._similarity_focus = "neutral"
                 self._embedding_weight = 0.5
                 self._bm25_weight = 0.5
                 self.append_log(f"Decision: neutral (weights: ebd=0.5, bm25=0.5)")
         except Exception as e:
             # On failure, default to neutral
+            self._similarity_focus = "neutral"
             self._embedding_weight = 0.5
             self._bm25_weight = 0.5
             self.append_log(f"Decision failed, defaulting to neutral: {str(e)}")
@@ -233,12 +238,12 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         self.append_log(f"Reconstructed {len(reconstructed)} instances")
         return reconstructed
 
-    async def execute(self) -> list[dict]:
+    async def execute(self) -> dict:
         """
         Execute retrieval workflow.
 
         Returns:
-            List of instances with filled_attributes
+            Results and retrieval analytics.
         """
         self.append_log("Knowledge retrieval started")
 
@@ -252,4 +257,9 @@ class KnowledgeRetrieveWorkflow(WorkflowBase):
         reconstructed = await self._merge_bp_instance(search_results)
 
         self.append_log("Knowledge retrieval completed")
-        return reconstructed
+        return {
+            "results": reconstructed,
+            "analytics": {
+                "similarity_focus": self._similarity_focus,
+            },
+        }

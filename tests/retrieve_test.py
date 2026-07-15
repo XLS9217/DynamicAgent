@@ -53,9 +53,12 @@ async def run_query_test(query_config: dict, bucket_cache: Path):
     top_k = 10
     print(f"\nRunning retrieve with top_k={top_k}...")
 
-    reconstructed = await KnowledgeInterface.retrieve(query, BUCKET_NAME, top_k)
+    retrieve_result = await KnowledgeInterface.retrieve(query, BUCKET_NAME, top_k)
+    reconstructed = retrieve_result["results"]
+    analytics = retrieve_result["analytics"]
 
     print(f"Reconstructed {len(reconstructed)} instances")
+    print(f"Analytics: {analytics}")
 
     # Dump results to cache
     output = {
@@ -64,6 +67,7 @@ async def run_query_test(query_config: dict, bucket_cache: Path):
         "description": query_config["description"],
         "bucket_name": BUCKET_NAME,
         "top_k": top_k,
+        "analytics": analytics,
         "reconstructed_instances": reconstructed
     }
 

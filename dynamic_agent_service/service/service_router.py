@@ -181,13 +181,17 @@ class KnowledgeRetrieveRequest(BaseModel):
 
 @router.post("/knowledge/retrieve")
 async def knowledge_retrieve(body: KnowledgeRetrieveRequest):
-    results = await KnowledgeInterface.retrieve(
+    retrieve_result = await KnowledgeInterface.retrieve(
         query=body.query,
         bucket_name=body.bucket_name,
         top_k=body.top_k,
         score_threshold=body.score_threshold
     )
-    return {"status": "ok", "results": results}
+    return {
+        "status": "ok",
+        "results": retrieve_result["results"],
+        "analytics": retrieve_result["analytics"],
+    }
 
 
 class KnowledgeExpandRequest(BaseModel):

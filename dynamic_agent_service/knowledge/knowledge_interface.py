@@ -116,7 +116,7 @@ class KnowledgeInterface:
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10, score_threshold: float = 0.3):
         """
         Retrieve entry point for searching knowledge.
-        Returns reconstructed blueprint instances matching the query.
+        Returns reconstructed blueprint instances and retrieval analytics.
 
         Args:
             query: Natural language search query
@@ -125,7 +125,7 @@ class KnowledgeInterface:
             score_threshold: Minimum avg distance score (0-1, higher=more relevant). Default 0.3
 
         Returns:
-            List of reconstructed instances with filled attributes
+            Dict with "results" and "analytics"
         """
         retrieve_wf = await build_workflow(
             KnowledgeRetrieveWorkflow,

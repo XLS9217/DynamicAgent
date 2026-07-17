@@ -40,6 +40,7 @@ class LanguageEngine:
             "model": self.model,
             "messages": messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
             "parallel_tool_calls": parallel_tool_calls
         }
         if tools:

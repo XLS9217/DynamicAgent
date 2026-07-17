@@ -9,3 +9,6 @@ class AgentToolCall(BaseModel):
 class AgentInvokeResult(BaseModel):
     full_text: str
     tool_calls: list[AgentToolCall]
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0

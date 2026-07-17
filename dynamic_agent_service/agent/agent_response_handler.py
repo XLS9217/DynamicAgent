@@ -63,8 +63,25 @@ class AgentResponseHandler:
         """
         full_response = ""
         tool_calls_dict = {}
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
 
         async for chunk in self.llm_engine.async_stream_response(messages, tools=tools, parallel_tool_calls=self.parallel_tool_calls):
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+                total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+                if stream_callback:
+                    await stream_callback(AgentResponseChunk(
+                        type="agent_chunk",
+                        text="",
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                    ))
+
             if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
 
@@ -105,7 +122,13 @@ class AgentResponseHandler:
         if not self.parallel_tool_calls and len(tool_calls) > 1:
             tool_calls = tool_calls[:1]
 
-        return AgentInvokeResult(full_text=full_response, tool_calls=tool_calls)
+        return AgentInvokeResult(
+            full_text=full_response,
+            tool_calls=tool_calls,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
 
     async def invoke(
             self,

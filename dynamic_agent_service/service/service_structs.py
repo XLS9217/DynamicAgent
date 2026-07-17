@@ -21,6 +21,9 @@ class AgentResponseChunk(BaseModel):
     tool_call: Optional[AgentToolCall] = None
     finished: bool = False
     invoked: bool = False
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
 
 class ToolResultRequest(BaseModel):
     session_id: str

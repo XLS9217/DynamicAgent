@@ -19,7 +19,7 @@ from dynamic_agent_service.operator.service_operator import ServiceOperator
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.util.debug_cache_writer import debug_cache_json, debug_cache_md
 
-logger = get_my_logger()
+logger = get_my_logger("tool")
 
 
 class OperatorHandler:

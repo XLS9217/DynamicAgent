@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 import aiofiles
-from datetime import datetime
+from datetime import UTC, datetime
 import asyncio
 
 load_dotenv()
@@ -20,7 +20,9 @@ class SessionLogger:
         except PermissionError:
             self.log_dir = Path.cwd() / ".cache" / "session_log" / session_id
             self.log_dir.mkdir(parents=True, exist_ok=True)
-        self._current_invoke_file = None
+        self._current_trigger_file: str | None = None
+        self._current_invoke: dict | None = None
+        self._invoke_index = 0
         self._write_queue = asyncio.Queue()
         self._writer_task = None
 
@@ -30,7 +32,8 @@ class SessionLogger:
             file, line = await self._write_queue.get()
             try:
                 log_file = self.log_dir / f"{file}.jsonl"
-                line_with_timestamp = {"timestamp": datetime.utcnow().isoformat() + "Z", **line}
+                timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+                line_with_timestamp = {"timestamp": timestamp, **line}
                 async with aiofiles.open(log_file, mode="a", encoding="utf-8") as f:
                     await f.write(json.dumps(line_with_timestamp, ensure_ascii=False) + "\n")
             except Exception as e:
@@ -57,15 +60,38 @@ class SessionLogger:
             line["data"] = data
         self._write("session_system_log", line)
 
-    # --- Invoke-level logging (invoke_YYYYMMDD_HHMMSS.jsonl) ---
+    # --- Trigger logging (one file per trigger, one line per LLM invoke) ---
 
-    def invoke_new(self):
-        """Start a new invoke log file. Named by current timestamp."""
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        self._current_invoke_file = f"invoke_{ts}"
-        return self._current_invoke_file
+    def trigger_new(self) -> str:
+        """Start a trigger file and close any incomplete previous trigger."""
+        self.trigger_complete()
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+        self._current_trigger_file = f"trigger_{ts}"
+        self._invoke_index = 0
+        return self._current_trigger_file
+
+    def invoke_new(self) -> None:
+        """Start a new invoke record, flushing the previous invoke as one line."""
+        self._flush_current_invoke()
+        if self._current_trigger_file is None:
+            self.trigger_new()
+        self._invoke_index += 1
+        self._current_invoke = {
+            "invoke": self._invoke_index,
+            "events": [],
+        }
 
     def invoke_log(self, line: dict):
-        """Log a line to the current invoke file."""
-        if self._current_invoke_file:
-            self._write(self._current_invoke_file, line)
+        """Append an event to the current invoke record."""
+        if self._current_invoke is not None:
+            self._current_invoke["events"].append(line)
+
+    def trigger_complete(self) -> None:
+        """Flush the final invoke and close the current trigger file."""
+        self._flush_current_invoke()
+        self._current_trigger_file = None
+
+    def _flush_current_invoke(self) -> None:
+        if self._current_trigger_file and self._current_invoke is not None:
+            self._write(self._current_trigger_file, self._current_invoke)
+        self._current_invoke = None

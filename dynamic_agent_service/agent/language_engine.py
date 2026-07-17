@@ -2,7 +2,7 @@ from openai import OpenAI, AsyncOpenAI
 
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
-logger = get_my_logger()
+logger = get_my_logger("agent")
 
 
 class LanguageEngine:

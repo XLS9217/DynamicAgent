@@ -7,7 +7,7 @@ from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvoke
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
-logger = get_my_logger()
+logger = get_my_logger("agent")
 
 DATA_INSPECTION_ERROR_MARKER = "DataInspectionFailed"
 SAFETY_RETRY_INSTRUCTION = (

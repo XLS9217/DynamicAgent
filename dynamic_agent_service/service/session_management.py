@@ -15,6 +15,7 @@ from dynamic_agent_service.service.monitor_events import MonitorEventHub, sessio
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 logger = get_my_logger()
+agent_logger = get_my_logger("agent")
 
 def _sanitize_json(raw: str) -> str:
     """Fix common LLM JSON quirks like leading zeros (e.g. 00.5 -> 0.5)."""
@@ -29,7 +30,7 @@ def _tool_arguments_to_object(raw: str | dict | None) -> dict:
     try:
         arguments = json.loads(_sanitize_json(raw or "{}"))
     except (json.JSONDecodeError, TypeError, ValueError):
-        logger.warning("Failed to parse tool arguments as JSON: %s", raw)
+        agent_logger.warning("Failed to parse tool arguments as JSON: %s", raw)
         return {}
     if not isinstance(arguments, dict):
         return {}
@@ -141,7 +142,7 @@ class RealtimeSession:
         try:
             while True:
                 message = await self.client.receive_json()
-                logger.info("received message %s", message)
+                agent_logger.info("received message %s", message)
         except WebSocketDisconnect:
             logger.info("WebSocketDisconnect")
         except Exception as e:
@@ -167,7 +168,7 @@ class RealtimeSession:
                 history=history,
             )
         except Exception as e:
-            logger.error("Error processing trigger: %s", e)
+            agent_logger.error("Error processing trigger: %s", e)
             error_chunk = AgentResponseChunk(type="agent_chunk", text="Error Occurred", finished=True, invoked=True)
             if self.client is not None:
                 await self.client.send_json(error_chunk.model_dump())

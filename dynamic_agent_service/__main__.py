@@ -18,6 +18,7 @@ from dynamic_agent_service.external_service.milvus_instance import MilvusInstanc
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
 from dynamic_agent_service.data.data_accessor import DataAccessor
+from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor  # noqa: F401  (registers subclass)
 from dynamic_agent_service.service.session_accessor import SessionAccessor  # noqa: F401  (registers subclass)
 
 

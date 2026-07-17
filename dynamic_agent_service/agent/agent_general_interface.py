@@ -10,7 +10,7 @@ from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
 
-logger = get_my_logger()
+logger = get_my_logger("agent")
 
 SYSTEM_MESSAGE_TEMPLATE = """{setting}
 
@@ -96,11 +96,7 @@ class AgentGeneralInterface:
         self._debug_writer.put_system(self._running_message_list[0]["content"])
         self._debug_writer.put_tools(self._parse_tool_list())
 
-        # Session logging: start new invoke
-        self._session_logger.invoke_new()
-        self._session_logger.invoke_log({"type": "system_prompt", "content": self._running_message_list[0]["content"]})
-        self._session_logger.invoke_log({"type": "tools", "tools": self._parse_tool_list()})
-        self._session_logger.invoke_log({"type": "conversation_history", "messages": self._running_message_list[1:]})
+        self._session_logger.trigger_new()
 
         await self.invoke()
 
@@ -109,12 +105,24 @@ class AgentGeneralInterface:
             raise RuntimeError(f"Agent is {self.state}")
 
         self._debug_writer.put_invoke(self._running_message_list)
+        self._session_logger.invoke_new()
+        self._session_logger.invoke_log({"type": "messages", "messages": self._running_message_list})
+        self._session_logger.invoke_log({"type": "tools", "tools": self._parse_tool_list()})
 
-        invoke_response = await self._response_handler.invoke(
-            messages=self._running_message_list,
-            tools=self._parse_tool_list(),
-            stream_callback=self._stream_callback,
-        )
+        try:
+            invoke_response = await self._response_handler.invoke(
+                messages=self._running_message_list,
+                tools=self._parse_tool_list(),
+                stream_callback=self._stream_callback,
+            )
+        except Exception as exc:
+            self._session_logger.invoke_log({
+                "type": "error",
+                "error_type": type(exc).__name__,
+                "message": str(exc),
+            })
+            self._session_logger.trigger_complete()
+            raise
 
         self._session_logger.invoke_log({
             "type": "llm_response",
@@ -140,6 +148,7 @@ class AgentGeneralInterface:
             if invoke_response.full_text:
                 self._running_message_list.append({"role": "assistant", "content": invoke_response.full_text})
                 self._session_logger.invoke_log({"type": "assistant_final", "content": invoke_response.full_text})
+            self._session_logger.trigger_complete()
             await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", finished=True, invoked=True))
             self._complete_run()
 

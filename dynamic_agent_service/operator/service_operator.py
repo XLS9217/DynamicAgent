@@ -20,7 +20,7 @@ Flow:
 
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
-logger = get_my_logger()
+logger = get_my_logger("tool")
 
 
 class ServiceOperator:

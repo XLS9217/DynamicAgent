@@ -1,6 +1,14 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 
+from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor
+from dynamic_agent_service.agent.llm_resource_structs import LLMResourceCreate, LLMResourceUpdate
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
+from dynamic_agent_service.util.log_accessor import (
+    clear_session_logs,
+    clear_system_log,
+    list_log_files,
+    read_log_file,
+)
 from dynamic_agent_service.service.monitor_events import MonitorEventHub
 from dynamic_agent_service.service.session_management import RealtimeSession, RealtimeSessionManager
 from dynamic_agent_service.util.setup_logging import get_my_logger
@@ -8,6 +16,23 @@ from dynamic_agent_service.util.setup_logging import get_my_logger
 logger = get_my_logger()
 
 router = APIRouter()
+
+
+def _mask_api_key(api_key: str) -> str:
+    if len(api_key) <= 4:
+        return "••••"
+    return f"••••{api_key[-4:]}"
+
+
+def _resource_payload(resource) -> dict:
+    return {
+        "resource_id": resource.resource_id,
+        "model": resource.model,
+        "api_key": _mask_api_key(resource.api_key),
+        "base_url": resource.base_url,
+        "enabled": resource.enabled,
+        "priority": resource.priority,
+    }
 
 
 @router.websocket("/monitor/events")
@@ -60,6 +85,67 @@ async def get_session(session_id: str):
         "messages": messages,
         "rag": rag.model_dump() if rag is not None else None,
     }
+
+
+@router.get("/monitor/llm-resources")
+async def list_llm_resources():
+    resources = await LLMResourceAccessor.list_resources(enabled_only=False)
+    return {"status": "ok", "resources": [_resource_payload(resource) for resource in resources]}
+
+
+@router.post("/monitor/llm-resources")
+async def create_llm_resource(resource: LLMResourceCreate):
+    created = await LLMResourceAccessor.create_resource(resource)
+    await MonitorEventHub.publish("llm_resource_created", {"resource_id": created.resource_id})
+    return {"status": "ok", "resource": _resource_payload(created)}
+
+
+@router.put("/monitor/llm-resources/{resource_id}")
+async def update_llm_resource(resource_id: str, update: LLMResourceUpdate):
+    if update.api_key == "":
+        update.api_key = None
+    resource = await LLMResourceAccessor.update_resource(resource_id, update)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="LLM resource not found")
+    await MonitorEventHub.publish("llm_resource_updated", {"resource_id": resource_id})
+    return {"status": "ok", "resource": _resource_payload(resource)}
+
+
+@router.delete("/monitor/llm-resources/{resource_id}")
+async def delete_llm_resource(resource_id: str):
+    if not await LLMResourceAccessor.delete_resource(resource_id):
+        raise HTTPException(status_code=404, detail="LLM resource not found")
+    await MonitorEventHub.publish("llm_resource_deleted", {"resource_id": resource_id})
+    return {"status": "ok", "resource_id": resource_id}
+
+
+@router.get("/monitor/logs")
+async def get_logs():
+    return {"status": "ok", "files": list_log_files()}
+
+
+@router.get("/monitor/logs/content")
+async def get_log_content(path: str):
+    try:
+        content = await read_log_file(path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Log file not found")
+    return {"status": "ok", **content}
+
+
+@router.delete("/monitor/logs/system")
+async def delete_system_log_content():
+    if not await clear_system_log():
+        raise HTTPException(status_code=404, detail="System log not found")
+    return {"status": "ok"}
+
+
+@router.delete("/monitor/logs/sessions/{session_id}")
+async def delete_session_log_content(session_id: str):
+    deleted = await clear_session_logs(session_id)
+    if deleted == 0:
+        raise HTTPException(status_code=404, detail="Session logs not found")
+    return {"status": "ok", "deleted": deleted}
 
 
 @router.get("/session/{session_id}/rag")

@@ -12,7 +12,7 @@ from qdrant_client.models import (
 )
 from src.util.setup_logging import get_my_logger
 
-logger = get_my_logger()
+logger = get_my_logger("storage")
 
 
 class QdrantInstance:

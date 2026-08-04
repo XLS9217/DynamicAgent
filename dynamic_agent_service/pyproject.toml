@@ -14,8 +14,6 @@ dependencies = [
     "websocket",
     "asyncpg>=0.31.0",
     "aiofiles>=25.1.0",
-    "PyMuPDF>=1.26.7",
-    "pillow>=12.1.1",
     "pymilvus>=2.6.0",
 ]
 

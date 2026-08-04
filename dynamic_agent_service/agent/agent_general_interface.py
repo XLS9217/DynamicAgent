@@ -1,4 +1,3 @@
-import os
 import asyncio
 import json
 from typing import Awaitable, Callable, Literal
@@ -30,14 +29,10 @@ OPERATOR_MESSAGE_TEMPLATE = """Here are the available operators you can use:
 
 class AgentGeneralInterface:
 
-    def __init__(self, llm_engine: LanguageEngine = None):
+    def __init__(self, llm_engine: LanguageEngine):
+        if llm_engine is None:
+            raise ValueError("A database-resolved language engine is required")
         self.llm_engine = llm_engine
-        if self.llm_engine is None:
-            self.llm_engine = LanguageEngine(
-                api_key=os.getenv("LLM_API_KEY"),
-                base_url=os.getenv("LLM_BASE_URL"),
-                model=os.getenv("LLM_NAME")
-            )
 
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
         self._setting = ""

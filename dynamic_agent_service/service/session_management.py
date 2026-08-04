@@ -6,6 +6,8 @@ import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
+from dynamic_agent_service.agent.language_engine import LanguageEngine
+from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor
 from dynamic_agent_service.agent.agent_structs import AgentToolCall
 from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest, RagCache
 from dynamic_agent_service.util.setup_logging import get_my_logger
@@ -93,15 +95,30 @@ class RealtimeSession:
         return RagCache.model_validate_json(raw) if raw else None
 
     async def agent_setup(self):
+        resource = await LLMResourceAccessor.get_active_resource()
+        if resource is None:
+            raise RuntimeError("No enabled LLM resource is configured")
+
         self.agi = await AgentGeneralInterface.create(
-            language_engine=None,
+            language_engine=LanguageEngine(
+                api_key=resource.api_key,
+                base_url=resource.base_url,
+                model=resource.model,
+            ),
             setting=self.setting,
             send_tool_calls=self._send_tool_calls,
             session_logger=self.session_logger,
         )
-        logger.info("AGI initialized for session %s", self.session_id)
+        logger.info(
+            "AGI initialized for session %s with LLM resource %s (%s)",
+            self.session_id,
+            resource.resource_id,
+            resource.model,
+        )
         self.session_logger.log_system("agent_setup", {
             "session_id": self.session_id,
+            "llm_resource_id": resource.resource_id,
+            "llm_model": resource.model,
             "setting": self.setting,
             "reconnect_keep": self.reconnect_keep,
         })

@@ -1,9 +1,9 @@
 """
 Base class for all workflows providing LLM invocation, logging, and subflow execution.
 
-Provides the shared infrastructure every workflow depends on: language engine and vision
-engine access, JSONL-based structured logging, and subflow composition. The build_workflow()
-factory handles engine initialization from environment variables and log file setup.
+Provides the shared infrastructure every workflow depends on: language-engine access,
+JSONL-based structured logging, and subflow composition. The build_workflow()
+factory resolves the language model from PostgreSQL and handles log file setup.
 Workflows are composed by calling execute_subflow(), which shares engines and log bucket
 with child workflows.
 """
@@ -16,7 +16,8 @@ from pathlib import Path
 import shutil
 from dotenv import load_dotenv
 from dynamic_agent_service.agent.language_engine import LanguageEngine
-from dynamic_agent_service.agent.vision_engine import VisionEngine
+from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor
+from dynamic_agent_service.external_service.pg_instance import PgInstance
 
 
 async def build_workflow(
@@ -26,15 +27,20 @@ async def build_workflow(
     **kwargs
 ):
     load_dotenv()
+
+    try:
+        PgInstance.get_pool()
+    except RuntimeError:
+        await PgInstance.initialize()
+
+    resource = await LLMResourceAccessor.get_active_resource()
+    if resource is None:
+        raise RuntimeError("No enabled LLM resource is configured")
+
     language_engine = LanguageEngine(
-        api_key=os.getenv("LLM_API_KEY"),
-        base_url=os.getenv("LLM_BASE_URL"),
-        model=os.getenv("LLM_NAME")
-    )
-    vision_engine = VisionEngine(
-        api_key=os.getenv("VLM_API_KEY"),
-        base_url=os.getenv("VLM_BASE_URL"),
-        model=os.getenv("VLM_NAME")
+        api_key=resource.api_key,
+        base_url=resource.base_url,
+        model=resource.model,
     )
     if workflow_log_path is None:
         cache_dir = os.getenv("CACHE_DIR")
@@ -51,7 +57,6 @@ async def build_workflow(
 
     workflow = workflow_cls()
     workflow._language_engine = language_engine
-    workflow._vision_engine = vision_engine
     workflow._workflow_log_path = workflow_log_path
     await workflow.build(*args, **kwargs)
     return workflow
@@ -63,7 +68,6 @@ class WorkflowBase(ABC):
         self._workflow_log_path = None
         self._caller_class = ""
         self._language_engine = None
-        self._vision_engine = None
 
     async def build(self, *args, **kwargs):
         return self
@@ -71,7 +75,6 @@ class WorkflowBase(ABC):
     async def execute_subflow(self, workflow_cls, *args, **kwargs):
         subflow = workflow_cls()
         subflow._language_engine = self._language_engine
-        subflow._vision_engine = self._vision_engine
         subflow._workflow_log_path = self._workflow_log_path
         subflow._caller_class = self.__class__.__name__
         await subflow.build(*args, **kwargs)
@@ -114,37 +117,12 @@ class WorkflowBase(ABC):
         record = self._build_log("SYSTEM", caller, message=message)
         self._write_log(record)
 
-    @staticmethod
-    def _strip_images(messages: list) -> list:
-        stripped = []
-        for msg in messages:
-            if isinstance(msg.get("content"), list):
-                text_parts = [p for p in msg["content"] if p.get("type") != "image_url"]
-                stripped.append({**msg, "content": text_parts})
-            else:
-                stripped.append(msg)
-        return stripped
-
-    @staticmethod
-    def _has_images(messages: list) -> bool:
-        for msg in messages:
-            if isinstance(msg.get("content"), list):
-                if any(p.get("type") == "image_url" for p in msg["content"]):
-                    return True
-        return False
-
-    async def invoke_agent(self, messages: list, images: list = None) -> str:
+    async def invoke_agent(self, messages: list) -> str:
         caller = inspect.stack()[1].function
-        use_vision = images or self._has_images(messages)
-
-        log_messages = self._strip_images(messages)
-        record = self._build_log("AGENT", caller, messages=log_messages)
+        record = self._build_log("AGENT", caller, messages=messages)
         self._write_log(record)
 
-        if use_vision:
-            response = await self._vision_engine.async_get_response(messages, images or [])
-        else:
-            response = await self._language_engine.async_get_response(messages)
+        response = await self._language_engine.async_get_response(messages)
 
         response_record = self._build_log("AGENT", caller, message=response)
         self._write_log(response_record)

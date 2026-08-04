@@ -48,6 +48,22 @@ class LLMResourceAccessor:
         return LLMResource(**dict(row)) if row is not None else None
 
     @staticmethod
+    async def get_active_resource() -> LLMResource | None:
+        """Return the highest-priority enabled resource for new invocations."""
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT resource_id, model, api_key, base_url, enabled, priority
+                FROM llm_resource
+                WHERE enabled = TRUE
+                ORDER BY priority DESC, resource_id
+                LIMIT 1
+                """
+            )
+        return LLMResource(**dict(row)) if row is not None else None
+
+    @staticmethod
     async def list_resources(enabled_only: bool = True) -> list[LLMResource]:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:

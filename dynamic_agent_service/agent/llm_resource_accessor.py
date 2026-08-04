@@ -5,30 +5,11 @@ from dynamic_agent_service.agent.llm_resource_structs import (
     LLMResourceCreate,
     LLMResourceUpdate,
 )
-from dynamic_agent_service.data.data_accessor import DataAccessor
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 
 
-class LLMResourceAccessor(DataAccessor):
+class LLMResourceAccessor:
     """PostgreSQL access for OpenAI-compatible LLM endpoint resources."""
-
-    @classmethod
-    async def ensure_tables_exist(cls) -> bool:
-        pool = PgInstance.get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS llm_resource (
-                    resource_id TEXT PRIMARY KEY,
-                    model       TEXT NOT NULL,
-                    api_key     TEXT NOT NULL,
-                    base_url    TEXT NOT NULL,
-                    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
-                    priority    INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE INDEX IF NOT EXISTS idx_llm_resource_enabled
-                    ON llm_resource (enabled, priority DESC);
-            """)
-        return True
 
     @staticmethod
     async def create_resource(resource: LLMResourceCreate) -> LLMResource:

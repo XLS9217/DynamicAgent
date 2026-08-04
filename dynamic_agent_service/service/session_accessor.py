@@ -7,7 +7,6 @@ Postgres is the durable source of truth; Redis is shared live session state.
 - durable load: read Redis first, then fall back to Postgres
 - ephemeral load: read only from Redis
 """
-from dynamic_agent_service.data.data_accessor import DataAccessor
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
 from dynamic_agent_service.service.service_structs import MessageItem
@@ -17,24 +16,7 @@ def _messages_key(session_id: str) -> str:
     return f"session:{session_id}:messages"
 
 
-class SessionAccessor(DataAccessor):
-
-    @classmethod
-    async def ensure_tables_exist(cls) -> bool:
-        """Initialize the PostgreSQL table for session messages."""
-        pool = PgInstance.get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS session_message (
-                    seq        BIGSERIAL PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    role       TEXT NOT NULL,
-                    content    TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_session_message_session_id
-                    ON session_message (session_id, seq);
-            """)
-        return True
+class SessionAccessor:
 
     @staticmethod
     async def append_message(

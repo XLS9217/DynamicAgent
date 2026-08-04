@@ -10,7 +10,6 @@ import uuid
 import json
 from pymilvus import DataType, Function, FunctionType
 
-from dynamic_agent_service.data.data_accessor import DataAccessor
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
@@ -30,46 +29,11 @@ def _decode_source_row(row) -> InstanceSource:
     return InstanceSource(**data)
 
 
-class KnowledgeAccessor(DataAccessor):
+class KnowledgeAccessor:
 
     # =====================================
     # Bucket related
     # =====================================
-
-    @classmethod
-    async def ensure_tables_exist(cls) -> bool:
-        """Initialize all PostgreSQL tables for knowledge system."""
-        pool = PgInstance.get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS bucket (
-                    name        TEXT PRIMARY KEY,
-                    description TEXT NOT NULL DEFAULT ''
-                );
-                CREATE TABLE IF NOT EXISTS blueprint (
-                    blueprint_id TEXT PRIMARY KEY,
-                    bucket_name  TEXT NOT NULL REFERENCES bucket(name),
-                    name         TEXT NOT NULL,
-                    description  TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS blueprint_attribute (
-                    attribute_id  TEXT PRIMARY KEY,
-                    blueprint_id  TEXT NOT NULL REFERENCES blueprint(blueprint_id),
-                    name          TEXT NOT NULL,
-                    description   TEXT NOT NULL,
-                    is_identifier BOOLEAN NOT NULL DEFAULT FALSE
-                );
-                CREATE TABLE IF NOT EXISTS blueprint_instance (
-                    instance_id  TEXT PRIMARY KEY,
-                    blueprint_id TEXT NOT NULL REFERENCES blueprint(blueprint_id)
-                );
-                CREATE TABLE IF NOT EXISTS instance_source (
-                    source_id       TEXT PRIMARY KEY,
-                    instance_id     TEXT NOT NULL REFERENCES blueprint_instance(instance_id) ON DELETE CASCADE,
-                    source_metadata JSONB NOT NULL
-                );
-            """)
-        return True
 
     @staticmethod
     async def create_bucket(bucket: Bucket) -> str:

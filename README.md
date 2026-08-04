@@ -78,4 +78,9 @@ Rules for logging (implemented in `SessionLogger`):
 
 
 # Service
+
+Before the first service start and after schema changes, initialize PostgreSQL with
+`uv run python -m dynamic_agent_service.init_storage`. Schema setup is kept in
+`dynamic_agent_service/init_storage.py` and is not run automatically at service startup.
+
 there are three module

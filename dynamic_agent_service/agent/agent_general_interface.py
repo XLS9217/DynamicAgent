@@ -1,10 +1,10 @@
 import asyncio
 import json
-from typing import Awaitable, Callable, Literal
+from typing import Awaitable, Callable
 
 from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
-from dynamic_agent_service.agent.language_engine import LanguageEngine
-from dynamic_agent_service.agent.agent_structs import AgentToolCall
+from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
+from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
@@ -29,19 +29,19 @@ OPERATOR_MESSAGE_TEMPLATE = """Here are the available operators you can use:
 
 class AgentGeneralInterface:
 
-    def __init__(self, llm_engine: LanguageEngine):
-        if llm_engine is None:
-            raise ValueError("A database-resolved language engine is required")
-        self.llm_engine = llm_engine
+    def __init__(self, openai_adapter: OpenAIAdapter):
+        if openai_adapter is None:
+            raise ValueError("A database-resolved OpenAI adapter is required")
+        self.openai_adapter = openai_adapter
 
         self._system_message_template = SYSTEM_MESSAGE_TEMPLATE
         self._setting = ""
         self._stream_callback = None
-        self._response_handler = AgentResponseHandler(self.llm_engine)
+        self._response_handler = AgentResponseHandler(self.openai_adapter)
 
         self._session_logger = None
         self._send_tool_calls = None
-        self.state: Literal["idle", "running", "gathering_tool_result"] = "idle"
+        self.state = AgentState.IDLE
         self.pending_tool_calls: dict[str, AgentToolCall] = {}
         self.pending_tool_results: dict[str, str] = {}
         self._running_message_list: list[dict] = []
@@ -56,13 +56,13 @@ class AgentGeneralInterface:
     @classmethod
     async def create(
             cls,
-            language_engine: LanguageEngine,
+            openai_adapter: OpenAIAdapter,
             setting: str = "",
             send_tool_calls: Callable[[list[AgentToolCall]], Awaitable[None]] = None,
             stream_callback: Callable = None,
             session_logger = None,
     ) -> "AgentGeneralInterface":
-        agi = cls(language_engine)
+        agi = cls(openai_adapter)
         agi._setting = setting
         agi._stream_callback = stream_callback
         agi._send_tool_calls = send_tool_calls
@@ -74,10 +74,10 @@ class AgentGeneralInterface:
         message: dict,
         history: list = None,
     ) -> None:
-        if self.state != "idle":
+        if self.state is not AgentState.IDLE:
             raise RuntimeError(f"Agent is {self.state}")
 
-        self.state = "running"
+        self.state = AgentState.RUNNING
         self._running_message_list = []
         self._debug_writer = DebugTriggerWriter()
         self._full_assistant_text = ""
@@ -96,7 +96,7 @@ class AgentGeneralInterface:
         await self.invoke()
 
     async def invoke(self) -> None:
-        if self.state != "running":
+        if self.state is not AgentState.RUNNING:
             raise RuntimeError(f"Agent is {self.state}")
 
         self._debug_writer.put_invoke(self._running_message_list)
@@ -157,7 +157,7 @@ class AgentGeneralInterface:
         return tools
 
     async def append_tool_result(self, tool_call_id: str, ok: bool, result: object) -> None:
-        if self.state != "gathering_tool_result":
+        if self.state is not AgentState.GATHERING:
             self._log_system("tool_result_rejected", {
                 "tool_call_id": tool_call_id,
                 "reason": f"agent_state:{self.state}",
@@ -185,7 +185,7 @@ class AgentGeneralInterface:
             asyncio.create_task(self._complete_tool_results_and_invoke())
 
     def _start_tool_result_gather(self, tool_calls: list[AgentToolCall]) -> None:
-        self.state = "gathering_tool_result"
+        self.state = AgentState.GATHERING
         self.pending_tool_calls = {tool_call.id: tool_call for tool_call in tool_calls}
         self.pending_tool_results = {}
         self._log_system("tool_calls_dispatched", {
@@ -194,7 +194,7 @@ class AgentGeneralInterface:
         })
 
     async def _complete_tool_results_and_invoke(self) -> None:
-        if self.state != "gathering_tool_result":
+        if self.state is not AgentState.GATHERING:
             return
 
         self._log_system("tool_results_complete", {
@@ -214,7 +214,7 @@ class AgentGeneralInterface:
             self._session_logger.invoke_log({"type": "tool_execution", **msg})
 
         self._clear_tool_state()
-        self.state = "running"
+        self.state = AgentState.RUNNING
         await self.invoke()
 
     def _all_tool_results_received(self) -> bool:
@@ -229,7 +229,7 @@ class AgentGeneralInterface:
         self._running_message_list = []
         self._debug_writer = None
         self._full_assistant_text = ""
-        self.state = "idle"
+        self.state = AgentState.IDLE
 
     def _log_system(self, event: str, data: dict = None) -> None:
         if self._session_logger is not None:

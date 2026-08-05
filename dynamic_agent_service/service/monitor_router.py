@@ -1,7 +1,12 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 
-from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor
-from dynamic_agent_service.agent.llm_resource_structs import LLMResourceCreate, LLMResourceUpdate
+from dynamic_agent_service.external_service.openai_resource_accessor import (
+    OpenAIResourceAccessor,
+)
+from dynamic_agent_service.external_service.openai_resource_structs import (
+    OpenAIResourceCreate,
+    OpenAIResourceUpdate,
+)
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 from dynamic_agent_service.util.log_accessor import (
     clear_session_logs,
@@ -87,35 +92,38 @@ async def get_session(session_id: str):
     }
 
 
-@router.get("/monitor/llm-resources")
-async def list_llm_resources():
-    resources = await LLMResourceAccessor.list_resources(enabled_only=False)
+@router.get("/monitor/openai-resources")
+async def list_openai_resources():
+    resources = await OpenAIResourceAccessor.list_resources(enabled_only=False)
     return {"status": "ok", "resources": [_resource_payload(resource) for resource in resources]}
 
 
-@router.post("/monitor/llm-resources")
-async def create_llm_resource(resource: LLMResourceCreate):
-    created = await LLMResourceAccessor.create_resource(resource)
-    await MonitorEventHub.publish("llm_resource_created", {"resource_id": created.resource_id})
+@router.post("/monitor/openai-resources")
+async def create_openai_resource(resource: OpenAIResourceCreate):
+    created = await OpenAIResourceAccessor.create_resource(resource)
+    await MonitorEventHub.publish(
+        "openai_resource_created",
+        {"resource_id": created.resource_id},
+    )
     return {"status": "ok", "resource": _resource_payload(created)}
 
 
-@router.put("/monitor/llm-resources/{resource_id}")
-async def update_llm_resource(resource_id: str, update: LLMResourceUpdate):
+@router.put("/monitor/openai-resources/{resource_id}")
+async def update_openai_resource(resource_id: str, update: OpenAIResourceUpdate):
     if update.api_key == "":
         update.api_key = None
-    resource = await LLMResourceAccessor.update_resource(resource_id, update)
+    resource = await OpenAIResourceAccessor.update_resource(resource_id, update)
     if resource is None:
-        raise HTTPException(status_code=404, detail="LLM resource not found")
-    await MonitorEventHub.publish("llm_resource_updated", {"resource_id": resource_id})
+        raise HTTPException(status_code=404, detail="OpenAI resource not found")
+    await MonitorEventHub.publish("openai_resource_updated", {"resource_id": resource_id})
     return {"status": "ok", "resource": _resource_payload(resource)}
 
 
-@router.delete("/monitor/llm-resources/{resource_id}")
-async def delete_llm_resource(resource_id: str):
-    if not await LLMResourceAccessor.delete_resource(resource_id):
-        raise HTTPException(status_code=404, detail="LLM resource not found")
-    await MonitorEventHub.publish("llm_resource_deleted", {"resource_id": resource_id})
+@router.delete("/monitor/openai-resources/{resource_id}")
+async def delete_openai_resource(resource_id: str):
+    if not await OpenAIResourceAccessor.delete_resource(resource_id):
+        raise HTTPException(status_code=404, detail="OpenAI resource not found")
+    await MonitorEventHub.publish("openai_resource_deleted", {"resource_id": resource_id})
     return {"status": "ok", "resource_id": resource_id}
 
 

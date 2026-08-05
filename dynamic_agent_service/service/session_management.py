@@ -6,9 +6,9 @@ import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
-from dynamic_agent_service.agent.language_engine import LanguageEngine
-from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor
-from dynamic_agent_service.agent.agent_structs import AgentToolCall
+from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
+from dynamic_agent_service.external_service.openai_resource_accessor import OpenAIResourceAccessor
+from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest, RagCache
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_logger import SessionLogger
@@ -58,11 +58,15 @@ class RealtimeSession:
         self.active_trigger_task: asyncio.Task | None = None
 
     @property
-    def state(self) -> str:
+    def state(self) -> AgentState:
         if self.agi is None:
-            return "idle"
-        if self.active_trigger_task is not None and not self.active_trigger_task.done() and self.agi.state == "idle":
-            return "running"
+            return AgentState.IDLE
+        if (
+            self.active_trigger_task is not None
+            and not self.active_trigger_task.done()
+            and self.agi.state is AgentState.IDLE
+        ):
+            return AgentState.RUNNING
         return self.agi.state
 
     # ===== Redis-backed session state (keys owned here, not in RedisInstance) =====
@@ -95,12 +99,12 @@ class RealtimeSession:
         return RagCache.model_validate_json(raw) if raw else None
 
     async def agent_setup(self):
-        resource = await LLMResourceAccessor.get_active_resource()
+        resource = await OpenAIResourceAccessor.get_active_resource()
         if resource is None:
-            raise RuntimeError("No enabled LLM resource is configured")
+            raise RuntimeError("No enabled OpenAI resource is configured")
 
         self.agi = await AgentGeneralInterface.create(
-            language_engine=LanguageEngine(
+            openai_adapter=OpenAIAdapter(
                 api_key=resource.api_key,
                 base_url=resource.base_url,
                 model=resource.model,
@@ -110,15 +114,15 @@ class RealtimeSession:
             session_logger=self.session_logger,
         )
         logger.info(
-            "AGI initialized for session %s with LLM resource %s (%s)",
+            "AGI initialized for session %s with OpenAI resource %s (%s)",
             self.session_id,
             resource.resource_id,
             resource.model,
         )
         self.session_logger.log_system("agent_setup", {
             "session_id": self.session_id,
-            "llm_resource_id": resource.resource_id,
-            "llm_model": resource.model,
+            "openai_resource_id": resource.resource_id,
+            "openai_model": resource.model,
             "setting": self.setting,
             "reconnect_keep": self.reconnect_keep,
         })
@@ -142,7 +146,7 @@ class RealtimeSession:
             await self.client.send_json(chunk.model_dump())
 
         self.agi._stream_callback = stream_callback
-        if self.agi.state == "gathering_tool_result" and self.agi.pending_tool_calls:
+        if self.agi.state is AgentState.GATHERING and self.agi.pending_tool_calls:
             await self._send_tool_calls(list(self.agi.pending_tool_calls.values()))
 
     def register_operator(self, operator_data: dict):
@@ -169,7 +173,7 @@ class RealtimeSession:
         """Trigger agent with text input. Response streams via WebSocket."""
         if self.client is None:
             raise RuntimeError("WebSocket not connected")
-        if self.agi.state != "idle":
+        if self.agi.state is not AgentState.IDLE:
             raise RuntimeError(f"Agent is {self.agi.state}")
 
         try:

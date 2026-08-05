@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS session_message (
 CREATE INDEX IF NOT EXISTS idx_session_message_session_id
     ON session_message (session_id, seq);
 
-CREATE TABLE IF NOT EXISTS llm_resource (
+CREATE TABLE IF NOT EXISTS openai_resource (
     resource_id TEXT PRIMARY KEY,
     model       TEXT NOT NULL,
     api_key     TEXT NOT NULL,
@@ -63,8 +63,8 @@ CREATE TABLE IF NOT EXISTS llm_resource (
     priority    INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_llm_resource_enabled
-    ON llm_resource (enabled, priority DESC);
+CREATE INDEX IF NOT EXISTS idx_openai_resource_enabled
+    ON openai_resource (enabled, priority DESC);
 """
 
 

@@ -15,8 +15,8 @@ import os
 from pathlib import Path
 import shutil
 from dotenv import load_dotenv
-from dynamic_agent_service.agent.language_engine import LanguageEngine
-from dynamic_agent_service.agent.llm_resource_accessor import LLMResourceAccessor
+from dynamic_agent_service.external_service.openai_resource_accessor import OpenAIResourceAccessor
+from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 
 
@@ -33,11 +33,11 @@ async def build_workflow(
     except RuntimeError:
         await PgInstance.initialize()
 
-    resource = await LLMResourceAccessor.get_active_resource()
+    resource = await OpenAIResourceAccessor.get_active_resource()
     if resource is None:
-        raise RuntimeError("No enabled LLM resource is configured")
+        raise RuntimeError("No enabled OpenAI resource is configured")
 
-    language_engine = LanguageEngine(
+    openai_adapter = OpenAIAdapter(
         api_key=resource.api_key,
         base_url=resource.base_url,
         model=resource.model,
@@ -56,7 +56,7 @@ async def build_workflow(
         f.write("")
 
     workflow = workflow_cls()
-    workflow._language_engine = language_engine
+    workflow._openai_adapter = openai_adapter
     workflow._workflow_log_path = workflow_log_path
     await workflow.build(*args, **kwargs)
     return workflow
@@ -67,14 +67,14 @@ class WorkflowBase(ABC):
     def __init__(self):
         self._workflow_log_path = None
         self._caller_class = ""
-        self._language_engine = None
+        self._openai_adapter = None
 
     async def build(self, *args, **kwargs):
         return self
 
     async def execute_subflow(self, workflow_cls, *args, **kwargs):
         subflow = workflow_cls()
-        subflow._language_engine = self._language_engine
+        subflow._openai_adapter = self._openai_adapter
         subflow._workflow_log_path = self._workflow_log_path
         subflow._caller_class = self.__class__.__name__
         await subflow.build(*args, **kwargs)
@@ -122,7 +122,7 @@ class WorkflowBase(ABC):
         record = self._build_log("AGENT", caller, messages=messages)
         self._write_log(record)
 
-        response = await self._language_engine.async_get_response(messages)
+        response = await self._openai_adapter.async_get_response(messages)
 
         response_record = self._build_log("AGENT", caller, message=response)
         self._write_log(response_record)

@@ -4,6 +4,7 @@ from fastapi import APIRouter, WebSocket, HTTPException, Request
 from pydantic import BaseModel
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
+from dynamic_agent_service.agent.agent_structs import AgentState
 from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
 from dynamic_agent_service.service.service_structs import CreateSessionRequest, ToolResultRequest
@@ -95,7 +96,7 @@ async def trigger(body: TriggerRequest):
     session = RealtimeSessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    if session.state != "idle":
+    if session.state is not AgentState.IDLE:
         raise HTTPException(status_code=409, detail=f"Session is {session.state}")
     session.active_trigger_task = asyncio.create_task(session.trigger_agent(body.text, bucket_name=body.bucket_name))
     return {"status": "accepted"}

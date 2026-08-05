@@ -1,15 +1,15 @@
-from openai import OpenAI, AsyncOpenAI
+from openai import AsyncOpenAI
 
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger("agent")
 
 
-class LanguageEngine:
+class OpenAIAdapter:
 
     def __init__(self, api_key: str, base_url: str, model: str):
         """
-        Initialize the LLM Engine with API credentials
+        Initialize an OpenAI-compatible API adapter.
 
         Args:
             api_key: API key for the LLM service

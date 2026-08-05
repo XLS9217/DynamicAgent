@@ -2,8 +2,8 @@ from typing import Callable
 
 from openai import APIError
 
-from dynamic_agent_service.agent.language_engine import LanguageEngine
 from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
+from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_service.service.service_structs import AgentResponseChunk
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
@@ -43,8 +43,8 @@ class AgentResponseHandler:
     """
     The response wrapper for generating response
     """
-    def __init__(self, llm_engine: LanguageEngine, parallel_tool_calls: bool = False):
-        self.llm_engine = llm_engine
+    def __init__(self, openai_adapter: OpenAIAdapter, parallel_tool_calls: bool = False):
+        self.openai_adapter = openai_adapter
         self.parallel_tool_calls = parallel_tool_calls
 
     async def _stream_response_flow(
@@ -67,7 +67,11 @@ class AgentResponseHandler:
         completion_tokens = 0
         total_tokens = 0
 
-        async for chunk in self.llm_engine.async_stream_response(messages, tools=tools, parallel_tool_calls=self.parallel_tool_calls):
+        async for chunk in self.openai_adapter.async_stream_response(
+            messages,
+            tools=tools,
+            parallel_tool_calls=self.parallel_tool_calls,
+        ):
             usage = getattr(chunk, "usage", None)
             if usage is not None:
                 prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)

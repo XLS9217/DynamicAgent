@@ -145,7 +145,7 @@ class RealtimeSession:
                     await self.append_message("assistant", assistant_text)
             await self.client.send_json(chunk.model_dump())
 
-        self.agi._stream_callback = stream_callback
+        self.agi.set_stream_callback(stream_callback)
         if self.agi.state is AgentState.GATHERING and self.agi.pending_tool_calls:
             await self._send_tool_calls(list(self.agi.pending_tool_calls.values()))
 

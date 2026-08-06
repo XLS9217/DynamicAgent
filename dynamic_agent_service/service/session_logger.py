@@ -21,7 +21,7 @@ class SessionLogger:
             self.log_dir = Path.cwd() / ".cache" / "session_log" / session_id
             self.log_dir.mkdir(parents=True, exist_ok=True)
         self._current_trigger_file: str | None = None
-        self._current_invoke: dict | None = None
+        self._current_invokes: dict[str, dict] = {}
         self._invoke_index = 0
         self._write_queue = asyncio.Queue()
         self._writer_task = None
@@ -70,28 +70,38 @@ class SessionLogger:
         self._invoke_index = 0
         return self._current_trigger_file
 
-    def invoke_new(self) -> None:
-        """Start a new invoke record, flushing the previous invoke as one line."""
-        self._flush_current_invoke()
+    def invoke_new(
+        self,
+        runner_id: str = "main",
+        runner_name: str = "main",
+        parent_runner_id: str | None = None,
+    ) -> None:
+        """Start an invoke record for one runner within the current trigger."""
+        self._flush_current_invoke(runner_id)
         if self._current_trigger_file is None:
             self.trigger_new()
         self._invoke_index += 1
-        self._current_invoke = {
+        self._current_invokes[runner_id] = {
             "invoke": self._invoke_index,
+            "runner_id": runner_id,
+            "runner_name": runner_name,
+            "parent_runner_id": parent_runner_id,
             "events": [],
         }
 
-    def invoke_log(self, line: dict):
-        """Append an event to the current invoke record."""
-        if self._current_invoke is not None:
-            self._current_invoke["events"].append(line)
+    def invoke_log(self, line: dict, runner_id: str = "main"):
+        """Append an event to the current invoke record for a runner."""
+        current_invoke = self._current_invokes.get(runner_id)
+        if current_invoke is not None:
+            current_invoke["events"].append(line)
 
     def trigger_complete(self) -> None:
         """Flush the final invoke and close the current trigger file."""
-        self._flush_current_invoke()
+        for runner_id in list(self._current_invokes):
+            self._flush_current_invoke(runner_id)
         self._current_trigger_file = None
 
-    def _flush_current_invoke(self) -> None:
-        if self._current_trigger_file and self._current_invoke is not None:
-            self._write(self._current_trigger_file, self._current_invoke)
-        self._current_invoke = None
+    def _flush_current_invoke(self, runner_id: str) -> None:
+        current_invoke = self._current_invokes.pop(runner_id, None)
+        if self._current_trigger_file and current_invoke is not None:
+            self._write(self._current_trigger_file, current_invoke)

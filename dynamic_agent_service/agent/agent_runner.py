@@ -18,18 +18,29 @@ class AgentRunner:
 
     def __init__(
         self,
+        name: str,
+        runner_id: str,
         openai_adapter: OpenAIAdapter,
         send_tool_calls: Callable[[list[AgentToolCall]], Awaitable[None]] | None = None,
         stream_callback: Callable | None = None,
         session_logger=None,
+        parent_runner: "AgentRunner | None" = None,
     ):
         if openai_adapter is None:
             raise ValueError("A database-resolved OpenAI adapter is required")
+        if not name.strip():
+            raise ValueError("Agent runner name must not be empty")
+        if not runner_id.strip():
+            raise ValueError("Agent runner ID must not be empty")
 
+        self.name = name.strip()
+        self.runner_id = runner_id.strip()
         self._response_handler = AgentResponseHandler(openai_adapter)
         self._send_tool_calls = send_tool_calls
         self._stream_callback = stream_callback
         self._session_logger = session_logger
+        self.parent_runner = parent_runner
+        self.parent_tool_call_id: str | None = None
 
         self.state = AgentState.IDLE
         self.pending_tool_calls: dict[str, AgentToolCall] = {}
@@ -63,7 +74,8 @@ class AgentRunner:
 
         self._debug_writer.put_system(self._running_message_list[0]["content"])
         self._debug_writer.put_tools(self._tools)
-        self._session_logger.trigger_new()
+        if self.parent_runner is None:
+            self._session_logger.trigger_new()
 
         await self.invoke()
 
@@ -72,32 +84,51 @@ class AgentRunner:
             raise RuntimeError(f"Agent is {self.state}")
 
         self._debug_writer.put_invoke(self._running_message_list)
-        self._session_logger.invoke_new()
-        self._session_logger.invoke_log({"type": "messages", "messages": self._running_message_list})
-        self._session_logger.invoke_log({"type": "tools", "tools": self._tools})
+        self._session_logger.invoke_new(
+            runner_id=self.runner_id,
+            runner_name=self.name,
+            parent_runner_id=(
+                self.parent_runner.runner_id if self.parent_runner is not None else None
+            ),
+        )
+        self._session_logger.invoke_log(
+            {"type": "messages", "messages": self._running_message_list},
+            runner_id=self.runner_id,
+        )
+        self._session_logger.invoke_log(
+            {"type": "tools", "tools": self._tools},
+            runner_id=self.runner_id,
+        )
 
         try:
             invoke_response = await self._response_handler.invoke(
                 messages=self._running_message_list,
                 tools=self._tools,
-                stream_callback=self._stream_callback,
+                stream_callback=self._handle_response_chunk,
             )
         except Exception as exc:
-            self._session_logger.invoke_log({
-                "type": "error",
-                "error_type": type(exc).__name__,
-                "message": str(exc),
-            })
-            self._session_logger.trigger_complete()
+            self._session_logger.invoke_log(
+                {
+                    "type": "error",
+                    "error_type": type(exc).__name__,
+                    "message": str(exc),
+                },
+                runner_id=self.runner_id,
+            )
+            if self.parent_runner is None:
+                self._session_logger.trigger_complete()
             raise
 
-        self._session_logger.invoke_log({
-            "type": "llm_response",
-            "full_text": invoke_response.full_text,
-            "tool_calls": [tc.model_dump() for tc in invoke_response.tool_calls] if invoke_response.tool_calls else None,
-        })
+        self._session_logger.invoke_log(
+            {
+                "type": "llm_response",
+                "full_text": invoke_response.full_text,
+                "tool_calls": [tc.model_dump() for tc in invoke_response.tool_calls] if invoke_response.tool_calls else None,
+            },
+            runner_id=self.runner_id,
+        )
 
-        await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", invoked=True))
+        await self._emit_chunk(AgentResponseChunk(type="agent_chunk", text="", invoked=True))
 
         if invoke_response.full_text:
             self._full_assistant_text += invoke_response.full_text
@@ -114,10 +145,35 @@ class AgentRunner:
 
         if invoke_response.full_text:
             self._running_message_list.append({"role": "assistant", "content": invoke_response.full_text})
-            self._session_logger.invoke_log({"type": "assistant_final", "content": invoke_response.full_text})
-        self._session_logger.trigger_complete()
-        await self._stream_callback(AgentResponseChunk(type="agent_chunk", text="", finished=True, invoked=True))
+            self._session_logger.invoke_log(
+                {"type": "assistant_final", "content": invoke_response.full_text},
+                runner_id=self.runner_id,
+            )
+        if self.parent_runner is None:
+            self._session_logger.trigger_complete()
+        await self._emit_chunk(AgentResponseChunk(
+            type="agent_chunk",
+            text=self._full_assistant_text if self.parent_runner is not None else "",
+            finished=True,
+        ))
         self._complete_run()
+
+    async def _handle_response_chunk(self, chunk: AgentResponseChunk) -> None:
+        """Stream content for the main runner only; subagents emit lifecycle events."""
+        if self.parent_runner is None:
+            await self._emit_chunk(chunk)
+
+    async def _emit_chunk(self, chunk: AgentResponseChunk) -> None:
+        if self._stream_callback is None:
+            return
+        await self._stream_callback(chunk.model_copy(update={
+            "runner_id": self.runner_id,
+            "runner_name": self.name,
+            "parent_runner_id": (
+                self.parent_runner.runner_id if self.parent_runner is not None else None
+            ),
+            "parent_tool_call_id": self.parent_tool_call_id,
+        }))
 
     async def append_tool_result(self, tool_call_id: str, ok: bool, result: object) -> None:
         if self.state is not AgentState.GATHERING:
@@ -173,7 +229,10 @@ class AgentRunner:
         ]
         self._running_message_list.extend(tool_messages)
         for message in tool_messages:
-            self._session_logger.invoke_log({"type": "tool_execution", **message})
+            self._session_logger.invoke_log(
+                {"type": "tool_execution", **message},
+                runner_id=self.runner_id,
+            )
 
         self._clear_tool_state()
         self.state = AgentState.RUNNING

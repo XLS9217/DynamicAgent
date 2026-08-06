@@ -16,6 +16,7 @@ class DynamicAgentClient:
 
     def __init__(self):
         self.session_id: str | None = None
+        self.runner_id: str | None = None
         self.websocket = None
         self.messages: list = []
 
@@ -23,14 +24,16 @@ class DynamicAgentClient:
         self._on_invoke: Callable[[str], None] | None = None
         self._on_tool_call: Callable[[str, dict], None] | None = None
         self._on_tool_result: Callable[[str, dict, any], None] | None = None
+        self._on_agent_event: Callable[[dict], None] | None = None
         self._accumulated_text = ""
         self._invoke_text = ""
         self._response_done = asyncio.Event()
         self._listen_task = None
+        self._tool_tasks: set[asyncio.Task] = set()
         self._connected = True
         self._needs_reconnect = True
 
-        self.tool_map = {}  # {prefixed_tool_name: callable}
+        self.tool_map: dict[str, dict[str, Callable]] = {}
         self._operators: list[AgentOperator] = []
 
     @classmethod
@@ -48,7 +51,12 @@ class DynamicAgentClient:
     ) -> "DynamicAgentClient":
         """Create a Redis-backed session. Set persist=True for PostgreSQL persistence."""
         instance = cls()
-        instance.session_id, instance.websocket, instance.messages = await ServiceHandler.create_session(
+        (
+            instance.session_id,
+            instance.runner_id,
+            instance.websocket,
+            instance.messages,
+        ) = await ServiceHandler.create_session(
             setting,
             instance,
             reconnect_keep=reconnect_keep,
@@ -66,22 +74,40 @@ class DynamicAgentClient:
 
                 if data.get("type") == "agent_chunk":
                     text = data["text"]
+                    is_main_runner = data.get("runner_id") in (None, self.runner_id)
 
-                    if text:
+                    if self._on_agent_event:
+                        try:
+                            self._on_agent_event(data)
+                        except Exception as exc:
+                            print(f"[agent_event] WARNING: callback failed: {exc}")
+
+                    if data.get("finished") and data.get("parent_tool_call_id"):
+                        await ServiceHandler.send_tool_result(
+                            session_id=self.session_id,
+                            runner_id=data["parent_runner_id"],
+                            tool_call_id=data["parent_tool_call_id"],
+                            ok=True,
+                            result=text,
+                        )
+
+                    if text and is_main_runner:
                         self._accumulated_text += text
                         self._invoke_text += text
                         if self._on_stream:
                             self._on_stream(text)
 
-                    if data.get("invoked"):
+                    if data.get("invoked") and is_main_runner:
                         if self._on_invoke:
                             self._on_invoke(self._invoke_text)
                         self._invoke_text = ""
 
-                    if data.get("finished"):
+                    if data.get("finished") and is_main_runner:
                         self._response_done.set()
                 elif data.get("type") == "tool_call":
-                    await self._handle_tool_call(data)
+                    task = asyncio.create_task(self._handle_tool_call(data))
+                    self._tool_tasks.add(task)
+                    task.add_done_callback(self._tool_tasks.discard)
         except websockets.exceptions.ConnectionClosed:
             pass
         except asyncio.CancelledError:
@@ -93,6 +119,7 @@ class DynamicAgentClient:
         llm_tool_name = data.get("name", "")
         arguments = data.get("arguments") or {}
         tool_call_id = data["tool_call_id"]
+        runner_id = data.get("runner_id")
 
         for key, value in list(arguments.items()):
             if isinstance(value, str):
@@ -102,8 +129,12 @@ class DynamicAgentClient:
                     pass
 
         ok = True
+        callable_func = None
         try:
-            callable_func = self.tool_map[llm_tool_name]
+            callable_func = self.tool_map[runner_id][llm_tool_name]
+            callable_func.operator.session_id = self.session_id
+            callable_func.operator.runner_id = runner_id
+            callable_func.operator.tool_call_id = tool_call_id
             if self._on_tool_call:
                 try:
                     self._on_tool_call(llm_tool_name, arguments)
@@ -127,8 +158,12 @@ class DynamicAgentClient:
             except Exception as exc:
                 print(f"[tool_call] WARNING: on_tool_result hook failed: {exc}")
 
+        if result is None:
+            return
+
         await ServiceHandler.send_tool_result(
             session_id=self.session_id,
+            runner_id=runner_id,
             tool_call_id=tool_call_id,
             ok=ok,
             result=result,
@@ -139,12 +174,14 @@ class DynamicAgentClient:
         text: str,
         on_stream: Callable[[str], None] = None,
         on_invoke: Callable[[str], None] = None,
+        on_agent_event: Callable[[dict], None] = None,
         bucket_name: str = None,
     ):
         await self._ensure_connected()
 
         self._on_stream = on_stream
         self._on_invoke = on_invoke
+        self._on_agent_event = on_agent_event
         self._accumulated_text = ""
         self._invoke_text = ""
         self._response_done.clear()
@@ -298,6 +335,10 @@ class DynamicAgentClient:
         if self.websocket:
             await self.websocket.close()
             self.websocket = None
+
+        for task in self._tool_tasks:
+            task.cancel()
+        self._tool_tasks.clear()
 
         if self.session_id:
             ServiceHandler.unregister_client(self.session_id, client_instance=self)

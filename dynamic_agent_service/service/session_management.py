@@ -56,6 +56,7 @@ class RealtimeSession:
         self.agi: AgentGeneralInterface | None = None
         self.session_logger = SessionLogger(self.session_id)
         self.active_trigger_task: asyncio.Task | None = None
+        self.subagent_tasks: set[asyncio.Task] = set()
 
     @property
     def state(self) -> AgentState:
@@ -139,15 +140,19 @@ class RealtimeSession:
         MonitorEventHub.publish_nowait("session_join", session_event_payload(self))
 
         async def stream_callback(chunk: AgentResponseChunk):
-            if chunk.finished and self.agi is not None:
+            if (
+                chunk.finished
+                and self.agi is not None
+                and chunk.runner_id == self.agi.runner_id
+            ):
                 assistant_text = self.agi.accumulated_assistant_text
                 if assistant_text:
                     await self.append_message("assistant", assistant_text)
             await self.client.send_json(chunk.model_dump())
 
         self.agi.set_stream_callback(stream_callback)
-        if self.agi.state is AgentState.GATHERING and self.agi.pending_tool_calls:
-            await self._send_tool_calls(list(self.agi.pending_tool_calls.values()))
+        for runner_id, tool_calls in self.agi.pending_tool_calls_by_runner():
+            await self._send_tool_calls(runner_id, tool_calls)
 
     def register_operator(self, operator_data: dict):
         """Forward serialized operator data to AGI for registration."""
@@ -190,22 +195,101 @@ class RealtimeSession:
             )
         except Exception as e:
             agent_logger.error("Error processing trigger: %s", e)
-            error_chunk = AgentResponseChunk(type="agent_chunk", text="Error Occurred", finished=True, invoked=True)
+            error_chunk = AgentResponseChunk(
+                type="agent_chunk",
+                text="Error Occurred",
+                finished=True,
+                runner_id=self.agi.runner_id,
+                runner_name="main",
+            )
             if self.client is not None:
                 await self.client.send_json(error_chunk.model_dump())
         finally:
             self.active_trigger_task = None
 
-    async def receive_tool_result(self, tool_call_id: str, ok: bool, result: object) -> None:
-        await self.agi.append_tool_result(tool_call_id=tool_call_id, ok=ok, result=result)
+    async def receive_tool_result(
+        self,
+        tool_call_id: str,
+        ok: bool,
+        result: object,
+        runner_id: str | None = None,
+    ) -> None:
+        await self.agi.append_tool_result(
+            tool_call_id=tool_call_id,
+            ok=ok,
+            result=result,
+            runner_id=runner_id,
+        )
 
-    async def _send_tool_calls(self, tool_calls: list[AgentToolCall]) -> None:
+    def init_subagent(
+        self,
+        parent_runner_id: str,
+        name: str,
+        setting: str,
+        operators: list[dict],
+    ) -> str:
+        return self.agi.init_subagent(
+            parent_runner_id=parent_runner_id,
+            name=name,
+            setting=setting,
+            operators=operators,
+        )
+
+    async def trigger_subagent(
+        self,
+        parent_runner_id: str,
+        parent_tool_call_id: str,
+        runner_id: str,
+        task: str,
+    ) -> None:
+        self.agi.validate_pending_tool_call(parent_runner_id, parent_tool_call_id)
+        self.agi.validate_subagent_trigger(runner_id, parent_runner_id)
+        task_handle = asyncio.create_task(
+            self._run_subagent(
+                parent_runner_id=parent_runner_id,
+                parent_tool_call_id=parent_tool_call_id,
+                runner_id=runner_id,
+                task=task,
+            )
+        )
+        self.subagent_tasks.add(task_handle)
+        task_handle.add_done_callback(self.subagent_tasks.discard)
+
+    async def _run_subagent(
+        self,
+        parent_runner_id: str,
+        parent_tool_call_id: str,
+        runner_id: str,
+        task: str,
+    ) -> None:
+        try:
+            await self.agi.trigger_subagent(
+                runner_id=runner_id,
+                parent_tool_call_id=parent_tool_call_id,
+                task=task,
+            )
+        except Exception as exc:
+            result = f"Subagent {runner_id} failed: {exc}"
+            if self.client is not None:
+                await self.client.send_json(AgentResponseChunk(
+                    type="agent_chunk",
+                    text=result,
+                    finished=True,
+                    runner_id=runner_id,
+                    parent_runner_id=parent_runner_id,
+                    parent_tool_call_id=parent_tool_call_id,
+                ).model_dump())
+
+    async def _send_tool_calls(self, runner_id: str, tool_calls: list[AgentToolCall]) -> None:
         if self.client is None:
             return
         for tool_call in tool_calls:
+            tool_call.session_id = self.session_id
+            tool_call.runner_id = runner_id
             await self.client.send_json({
                 "type": "tool_call",
-                "session_id": self.session_id,
+                "session_id": tool_call.session_id,
+                "runner_id": tool_call.runner_id,
                 "tool_call_id": tool_call.id,
                 "name": tool_call.name,
                 "arguments": _tool_arguments_to_object(tool_call.arguments),

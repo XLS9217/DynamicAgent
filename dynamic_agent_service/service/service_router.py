@@ -7,7 +7,12 @@ from dynamic_agent_service.service.session_management import RealtimeSessionMana
 from dynamic_agent_service.agent.agent_structs import AgentState
 from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
-from dynamic_agent_service.service.service_structs import CreateSessionRequest, ToolResultRequest
+from dynamic_agent_service.service.service_structs import (
+    CreateSessionRequest,
+    InitSubagentRequest,
+    ToolResultRequest,
+    TriggerSubagentRequest,
+)
 from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
@@ -25,7 +30,12 @@ async def create_session(body: CreateSessionRequest, request: Request):
     socket_url = f"{ws_scheme}://{request.headers['host']}/agent_session?session_id={session.session_id}"
 
     messages = await session.load_messages()
-    return {"session_id": session.session_id, "socket_url": socket_url, "messages": messages}
+    return {
+        "session_id": session.session_id,
+        "runner_id": session.agi.runner_id,
+        "socket_url": socket_url,
+        "messages": messages,
+    }
 
 
 @router.post("/tool_result")
@@ -38,10 +48,45 @@ async def tool_result(body: ToolResultRequest):
             tool_call_id=body.tool_call_id,
             ok=body.ok,
             result=body.result,
+            runner_id=body.runner_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return {"status": "ok"}
+
+
+@router.post("/init_subagent")
+async def init_subagent(body: InitSubagentRequest):
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        runner_id = session.init_subagent(
+            parent_runner_id=body.parent_runner_id,
+            name=body.name,
+            setting=body.setting,
+            operators=body.operators,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"status": "ok", "runner_id": runner_id, "name": body.name}
+
+
+@router.post("/trigger_subagent")
+async def trigger_subagent(body: TriggerSubagentRequest):
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        await session.trigger_subagent(
+            parent_runner_id=body.parent_runner_id,
+            parent_tool_call_id=body.parent_tool_call_id,
+            runner_id=body.runner_id,
+            task=body.task,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"status": "accepted"}
 
 
 @router.websocket("/agent_session")

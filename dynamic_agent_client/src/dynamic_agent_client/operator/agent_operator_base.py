@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 logger = getLogger(__name__)
 
+
 def _parse_docstring_params(docstring: str | None) -> dict[str, str]:
     """Parse :param name: description lines from a docstring."""
     if not docstring:
@@ -147,6 +148,9 @@ class AgentOperator(ABC):
         self._tool_call_counts: dict[str, int] = {}
         self._description_func = None
         self._flow_funcs: list[tuple[str, Callable]] = []
+        self.session_id: str | None = None
+        self.runner_id: str | None = None
+        self.tool_call_id: str | None = None
         self._collect_tools()
 
     def _collect_tools(self):

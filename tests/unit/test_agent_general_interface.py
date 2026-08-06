@@ -1,6 +1,38 @@
 import unittest
+from types import SimpleNamespace
 
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
+
+
+class _SessionLoggerStub:
+    def trigger_new(self):
+        pass
+
+    def trigger_complete(self):
+        pass
+
+    def invoke_new(self, *args, **kwargs):
+        pass
+
+    def invoke_log(self, record, *args, **kwargs):
+        pass
+
+    def log_system(self, event, data=None):
+        pass
+
+
+class _OpenAIAdapterStub:
+    def __init__(self):
+        self.calls = []
+
+    async def async_stream_response(self, messages, tools=None, parallel_tool_calls=False):
+        self.calls.append({"messages": messages, "tools": tools})
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(
+                delta=SimpleNamespace(content="subagent result", tool_calls=None),
+            )],
+            usage=None,
+        )
 
 
 class AgentGeneralInterfaceTest(unittest.IsolatedAsyncioTestCase):
@@ -31,6 +63,82 @@ class AgentGeneralInterfaceTest(unittest.IsolatedAsyncioTestCase):
         interface = AgentGeneralInterface(openai_adapter=object())
 
         self.assertIn("No operators are available.", interface._build_system_prompt())
+
+    def test_assigns_unique_runner_ids_and_rejects_duplicate_names(self):
+        interface = AgentGeneralInterface(
+            openai_adapter=object(),
+            session_logger=_SessionLoggerStub(),
+        )
+        child = interface._create_runner(
+            name="researcher",
+            openai_adapter=object(),
+            stream_callback=None,
+            session_logger=_SessionLoggerStub(),
+        )
+
+        self.assertEqual(interface._runner.name, "main")
+        self.assertNotEqual(interface.runner_id, child.runner_id)
+        with self.assertRaisesRegex(ValueError, "Agent runner name already exists: researcher"):
+            interface._create_runner(
+                name="researcher",
+                openai_adapter=object(),
+                stream_callback=None,
+                session_logger=_SessionLoggerStub(),
+            )
+
+    async def test_triggers_named_subagent_with_selected_setting_and_operators(self):
+        adapter = _OpenAIAdapterStub()
+        interface = AgentGeneralInterface(
+            openai_adapter=adapter,
+            session_logger=_SessionLoggerStub(),
+        )
+        operators = [{
+            "name": "ResearchOperator",
+            "description": "Research information.",
+            "tools": [],
+        }]
+
+        runner_id = interface.init_subagent(
+            parent_runner_id=interface.runner_id,
+            name="researcher",
+            setting="You are a research specialist.",
+            operators=operators,
+        )
+        result = await interface.trigger_subagent(
+            runner_id=runner_id,
+            parent_tool_call_id="parent-call",
+            task="Investigate the topic.",
+        )
+
+        self.assertEqual(result, "subagent result")
+        self.assertEqual(list(interface._runner_id_by_name), ["main", "researcher"])
+        messages = adapter.calls[0]["messages"]
+        self.assertIn("You are a research specialist.", messages[0]["content"])
+        self.assertIn("ResearchOperator", messages[0]["content"])
+        self.assertIn(
+            {"role": "user", "content": "Investigate the topic."},
+            messages,
+        )
+
+    async def test_rejects_duplicate_subagent_operator_names(self):
+        interface = AgentGeneralInterface(
+            openai_adapter=object(),
+            session_logger=_SessionLoggerStub(),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Duplicate subagent operator names: DuplicateOperator",
+        ):
+            interface.init_subagent(
+                parent_runner_id=interface.runner_id,
+                name="researcher",
+                setting="Research carefully.",
+                operators=[
+                    {"name": "DuplicateOperator", "tools": []},
+                    {"name": "DuplicateOperator", "tools": []},
+                ],
+            )
 
 
 if __name__ == "__main__":

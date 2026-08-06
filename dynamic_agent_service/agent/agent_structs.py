@@ -15,6 +15,8 @@ class AgentToolCall(BaseModel):
     id: str
     name: str
     arguments: str  # this must be json string
+    session_id: str | None = None
+    runner_id: str | None = None
 
 
 class AgentInvokeResult(BaseModel):

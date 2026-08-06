@@ -49,6 +49,9 @@ class TokenUsageTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chunk.prompt_tokens, 0)
         self.assertEqual(chunk.completion_tokens, 0)
         self.assertEqual(chunk.total_tokens, 0)
+        self.assertIsNone(chunk.runner_id)
+        self.assertIsNone(chunk.runner_name)
+        self.assertIsNone(chunk.parent_runner_id)
 
 
 if __name__ == "__main__":

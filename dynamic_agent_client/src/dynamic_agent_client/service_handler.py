@@ -24,6 +24,8 @@ def _make_operator_tool_callable(operator, tool_name: str):
     def call_tool(**arguments):
         return operator.execute(tool_name, arguments)
 
+    call_tool.operator = operator
+
     return call_tool
 
 
@@ -60,7 +62,7 @@ class ServiceHandler:
         persist: bool = False,
     ) -> tuple:
         """
-        POST /create_session to the service, register client, return (session_id, websocket, messages).
+        POST /create_session to the service, register client, and return session data.
         """
         resp = await cls._http.post(
             f"{cls._server_addr}/create_session",
@@ -75,6 +77,7 @@ class ServiceHandler:
         data = resp.json()
 
         session_id = data["session_id"]
+        runner_id = data["runner_id"]
         socket_url = data["socket_url"]
         messages = data["messages"]
 
@@ -84,7 +87,7 @@ class ServiceHandler:
         cls._clients[session_id] = client
 
         ws = await websockets.connect(socket_url)
-        return session_id, ws, messages
+        return session_id, runner_id, ws, messages
 
     @classmethod
     async def add_operator(cls, session_id: str, client, operator):
@@ -94,9 +97,11 @@ class ServiceHandler:
         """
         serialized = operator.get_serialized_operator()
 
-        for tool_name in operator._tools:
-            prefixed_name = f"{serialized.name}_{tool_name}"
-            client.tool_map[prefixed_name] = _make_operator_tool_callable(operator, tool_name)
+        cls.register_runner_operators(
+            session_id=session_id,
+            runner_id=client.runner_id,
+            operators=[operator],
+        )
 
         resp = await cls._http.post(
             f"{cls._server_addr}/agent_operator",
@@ -119,16 +124,88 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
-    async def send_tool_result(cls, session_id: str, tool_call_id: str, ok: bool, result):
+    def register_runner_operators(
+        cls,
+        session_id: str,
+        runner_id: str,
+        operators: list,
+    ) -> None:
+        client = cls._clients.get(session_id)
+        if client is None:
+            raise RuntimeError(f"Client session is not registered: {session_id}")
+
+        runner_tools = client.tool_map.setdefault(runner_id, {})
+        for operator in operators:
+            serialized = operator.get_serialized_operator()
+            operator.session_id = session_id
+            operator.runner_id = runner_id
+            for tool_name in operator._tools:
+                prefixed_name = f"{serialized.name}_{tool_name}"
+                runner_tools[prefixed_name] = _make_operator_tool_callable(operator, tool_name)
+
+    @classmethod
+    async def send_tool_result(
+        cls,
+        session_id: str,
+        tool_call_id: str,
+        ok: bool,
+        result,
+        runner_id: str | None = None,
+    ):
         """Send a locally executed tool result back to the service."""
         serialized_result = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
         resp = await cls._http.post(
             f"{cls._server_addr}/tool_result",
             json={
                 "session_id": session_id,
+                "runner_id": runner_id,
                 "tool_call_id": tool_call_id,
                 "ok": ok,
                 "result": serialized_result,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @classmethod
+    async def init_subagent(
+        cls,
+        session_id: str,
+        parent_runner_id: str,
+        name: str,
+        setting: str,
+        operators: list[dict],
+    ) -> dict:
+        resp = await cls._http.post(
+            f"{cls._server_addr}/init_subagent",
+            json={
+                "session_id": session_id,
+                "parent_runner_id": parent_runner_id,
+                "name": name,
+                "setting": setting,
+                "operators": operators,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    @classmethod
+    async def trigger_subagent(
+        cls,
+        session_id: str,
+        parent_runner_id: str,
+        parent_tool_call_id: str,
+        runner_id: str,
+        task: str,
+    ) -> dict:
+        resp = await cls._http.post(
+            f"{cls._server_addr}/trigger_subagent",
+            json={
+                "session_id": session_id,
+                "parent_runner_id": parent_runner_id,
+                "parent_tool_call_id": parent_tool_call_id,
+                "runner_id": runner_id,
+                "task": task,
             },
         )
         resp.raise_for_status()

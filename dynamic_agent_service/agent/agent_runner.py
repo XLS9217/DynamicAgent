@@ -5,7 +5,7 @@ from typing import Awaitable, Callable
 from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
 from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
-from dynamic_agent_service.service.service_structs import AgentResponseChunk
+from dynamic_agent_client.client_struct import AgentResponseChunk
 from dynamic_agent_service.util.debug_trigger_writer import DebugTriggerWriter
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
@@ -159,9 +159,8 @@ class AgentRunner:
         self._complete_run()
 
     async def _handle_response_chunk(self, chunk: AgentResponseChunk) -> None:
-        """Stream content for the main runner only; subagents emit lifecycle events."""
-        if self.parent_runner is None:
-            await self._emit_chunk(chunk)
+        """Forward model stream chunks with runner metadata."""
+        await self._emit_chunk(chunk)
 
     async def _emit_chunk(self, chunk: AgentResponseChunk) -> None:
         if self._stream_callback is None:

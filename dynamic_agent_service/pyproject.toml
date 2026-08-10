@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Backend service that orchestrates the agent, manages conversations, and coordinates tool execution"
 requires-python = ">=3.13"
 dependencies = [
+    "dynamic-agent-client",
     "openai>=1.0",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",

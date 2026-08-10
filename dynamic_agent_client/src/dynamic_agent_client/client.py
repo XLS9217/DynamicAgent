@@ -7,7 +7,9 @@ import json
 from typing import Callable
 
 import websockets
+from pydantic import ValidationError
 
+from .client_struct import AgentResponseChunk, AgentToolCallMessage, service_to_client_message_adapter
 from .operator.agent_operator_base import AgentOperator
 from .service_handler import ServiceHandler
 
@@ -25,6 +27,7 @@ class DynamicAgentClient:
         self._on_tool_call: Callable[[str, dict], None] | None = None
         self._on_tool_result: Callable[[str, dict, any], None] | None = None
         self._on_agent_event: Callable[[dict], None] | None = None
+        self._show_subagent_stream = False
         self._accumulated_text = ""
         self._invoke_text = ""
         self._response_done = asyncio.Event()
@@ -70,23 +73,36 @@ class DynamicAgentClient:
         """Listen for messages from server. Sets _connected=False on disconnect."""
         try:
             async for message in self.websocket:
-                data = json.loads(message)
+                try:
+                    service_message = service_to_client_message_adapter.validate_json(message)
+                except ValidationError as exc:
+                    print(f"[websocket] ERROR: Invalid service message: {exc}")
+                    continue
 
-                if data.get("type") == "agent_chunk":
-                    text = data["text"]
-                    is_main_runner = data.get("runner_id") in (None, self.runner_id)
+                if isinstance(service_message, AgentResponseChunk):
+                    data = service_message.model_dump(exclude_none=True)
+                    text = service_message.text
+                    is_main_runner = service_message.runner_id in (None, self.runner_id)
+                    is_subagent_stream = (
+                        service_message.parent_runner_id is not None
+                        and not service_message.invoked
+                        and not service_message.finished
+                    )
 
-                    if self._on_agent_event:
+                    if (
+                        self._on_agent_event
+                        and (self._show_subagent_stream or not is_subagent_stream)
+                    ):
                         try:
                             self._on_agent_event(data)
                         except Exception as exc:
                             print(f"[agent_event] WARNING: callback failed: {exc}")
 
-                    if data.get("finished") and data.get("parent_tool_call_id"):
+                    if service_message.finished and service_message.parent_tool_call_id:
                         await ServiceHandler.send_tool_result(
                             session_id=self.session_id,
-                            runner_id=data["parent_runner_id"],
-                            tool_call_id=data["parent_tool_call_id"],
+                            runner_id=service_message.parent_runner_id,
+                            tool_call_id=service_message.parent_tool_call_id,
                             ok=True,
                             result=text,
                         )
@@ -97,15 +113,15 @@ class DynamicAgentClient:
                         if self._on_stream:
                             self._on_stream(text)
 
-                    if data.get("invoked") and is_main_runner:
+                    if service_message.invoked and is_main_runner:
                         if self._on_invoke:
                             self._on_invoke(self._invoke_text)
                         self._invoke_text = ""
 
-                    if data.get("finished") and is_main_runner:
+                    if service_message.finished and is_main_runner:
                         self._response_done.set()
-                elif data.get("type") == "tool_call":
-                    task = asyncio.create_task(self._handle_tool_call(data))
+                elif isinstance(service_message, AgentToolCallMessage):
+                    task = asyncio.create_task(self._handle_tool_call(service_message))
                     self._tool_tasks.add(task)
                     task.add_done_callback(self._tool_tasks.discard)
         except websockets.exceptions.ConnectionClosed:
@@ -115,11 +131,11 @@ class DynamicAgentClient:
 
         self._connected = False
 
-    async def _handle_tool_call(self, data: dict):
-        llm_tool_name = data.get("name", "")
-        arguments = data.get("arguments") or {}
-        tool_call_id = data["tool_call_id"]
-        runner_id = data.get("runner_id")
+    async def _handle_tool_call(self, tool_call: AgentToolCallMessage):
+        llm_tool_name = tool_call.name
+        arguments = dict(tool_call.arguments)
+        tool_call_id = tool_call.tool_call_id
+        runner_id = tool_call.runner_id
 
         for key, value in list(arguments.items()):
             if isinstance(value, str):
@@ -174,14 +190,16 @@ class DynamicAgentClient:
         text: str,
         on_stream: Callable[[str], None] = None,
         on_invoke: Callable[[str], None] = None,
-        on_agent_event: Callable[[dict], None] = None,
         bucket_name: str = None,
+        on_agent_event: Callable[[dict], None] = None,
+        show_subagent_stream: bool = False,
     ):
         await self._ensure_connected()
 
         self._on_stream = on_stream
         self._on_invoke = on_invoke
         self._on_agent_event = on_agent_event
+        self._show_subagent_stream = show_subagent_stream
         self._accumulated_text = ""
         self._invoke_text = ""
         self._response_done.clear()
@@ -211,16 +229,6 @@ class DynamicAgentClient:
     def on_tool_call(self, callback: Callable[[str, dict], None]):
         """
         Set callback for when a tool is about to execute.
-
-        The callback receives:
-        - tool_name (str): The name of the tool being called
-        - arguments (dict): The arguments passed to the tool
-
-        Example:
-            def log_tool_call(tool_name: str, arguments: dict):
-                print(f"Calling {tool_name} with {arguments}")
-
-            client.on_tool_call(log_tool_call)
         """
         self._on_tool_call = callback
         return self
@@ -228,17 +236,6 @@ class DynamicAgentClient:
     def on_tool_result(self, callback: Callable[[str, dict, any], None]):
         """
         Set callback for after a tool execution completes.
-
-        The callback receives:
-        - tool_name (str): The name of the tool that was called
-        - arguments (dict): The arguments that were passed to the tool
-        - result (any): The return value from the tool
-
-        Example:
-            def log_tool_result(tool_name: str, arguments: dict, result: any):
-                print(f"{tool_name} returned: {result}")
-
-            client.on_tool_result(log_tool_result)
         """
         self._on_tool_result = callback
         return self
@@ -277,16 +274,6 @@ class DynamicAgentClient:
             entity_limit_one,
             use_existing_blueprint,
         )
-
-    @classmethod
-    async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
-        """Retrieve knowledge from a bucket. Returns (results, analytics)."""
-        return await ServiceHandler.retrieve(query, bucket_name, top_k)
-
-    @classmethod
-    async def expand_node_ids(cls, bucket_name: str, node_ids: list[str]):
-        """Expand knowledge node IDs into their stored values."""
-        return await ServiceHandler.expand_node_ids(bucket_name, node_ids)
 
     async def _ensure_connected(self):
         """Ensure websocket is connected, reconnect if needed."""

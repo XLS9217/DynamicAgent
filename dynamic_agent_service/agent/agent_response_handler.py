@@ -4,7 +4,7 @@ from openai import APIError
 
 from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
-from dynamic_agent_service.service.service_structs import AgentResponseChunk
+from dynamic_agent_client.client_struct import AgentResponseChunk
 from dynamic_agent_service.util.setup_logging import get_my_logger
 
 logger = get_my_logger("agent")

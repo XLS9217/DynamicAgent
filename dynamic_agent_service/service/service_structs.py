@@ -1,7 +1,7 @@
-from typing import Literal, Optional
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-from dynamic_agent_service.agent.agent_structs import AgentToolCall
+from dynamic_agent_client.client_struct import AgentResponseChunk
 
 
 class CreateSessionRequest(BaseModel):
@@ -11,23 +11,6 @@ class CreateSessionRequest(BaseModel):
     session_id: Optional[str] = None  # provided to resume an existing session
     persist: bool = False
 
-
-class AgentResponseChunk(BaseModel):
-    """
-    text stream response
-    """
-    type: Literal["agent_chunk"]
-    text: str
-    tool_call: Optional[AgentToolCall] = None
-    finished: bool = False
-    invoked: bool = False
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-    runner_id: str | None = None
-    runner_name: str | None = None
-    parent_runner_id: str | None = None
-    parent_tool_call_id: str | None = None
 
 class ToolResultRequest(BaseModel):
     session_id: str

@@ -5,11 +5,12 @@ import time
 import uuid
 from fastapi import WebSocket, WebSocketDisconnect
 
+from dynamic_agent_client.client_struct import AgentResponseChunk, AgentToolCallMessage
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
 from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
 from dynamic_agent_service.external_service.openai_resource_accessor import OpenAIResourceAccessor
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
-from dynamic_agent_service.service.service_structs import AgentResponseChunk, CreateSessionRequest, RagCache
+from dynamic_agent_service.service.service_structs import CreateSessionRequest, RagCache
 from dynamic_agent_service.util.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_logger import SessionLogger
 from dynamic_agent_service.service.session_accessor import SessionAccessor
@@ -148,7 +149,7 @@ class RealtimeSession:
                 assistant_text = self.agi.accumulated_assistant_text
                 if assistant_text:
                     await self.append_message("assistant", assistant_text)
-            await self.client.send_json(chunk.model_dump())
+            await self.client.send_json(chunk.model_dump(exclude_none=True))
 
         self.agi.set_stream_callback(stream_callback)
         for runner_id, tool_calls in self.agi.pending_tool_calls_by_runner():
@@ -278,7 +279,7 @@ class RealtimeSession:
                     runner_id=runner_id,
                     parent_runner_id=parent_runner_id,
                     parent_tool_call_id=parent_tool_call_id,
-                ).model_dump())
+                ).model_dump(exclude_none=True))
 
     async def _send_tool_calls(self, runner_id: str, tool_calls: list[AgentToolCall]) -> None:
         if self.client is None:
@@ -286,14 +287,15 @@ class RealtimeSession:
         for tool_call in tool_calls:
             tool_call.session_id = self.session_id
             tool_call.runner_id = runner_id
-            await self.client.send_json({
-                "type": "tool_call",
-                "session_id": tool_call.session_id,
-                "runner_id": tool_call.runner_id,
-                "tool_call_id": tool_call.id,
-                "name": tool_call.name,
-                "arguments": _tool_arguments_to_object(tool_call.arguments),
-            })
+            message = AgentToolCallMessage(
+                type="tool_call",
+                session_id=tool_call.session_id,
+                runner_id=tool_call.runner_id,
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                arguments=_tool_arguments_to_object(tool_call.arguments),
+            )
+            await self.client.send_json(message.model_dump(exclude_none=True))
 
 
 class RealtimeSessionManager:

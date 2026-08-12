@@ -7,6 +7,8 @@ Postgres is the durable source of truth; Redis is shared live session state.
 - durable load: read Redis first, then fall back to Postgres
 - ephemeral load: read only from Redis
 """
+import uuid
+
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
 from dynamic_agent_service.service.service_structs import MessageItem
@@ -24,20 +26,27 @@ class SessionAccessor:
         role: str,
         content: str,
         durable: bool = True,
-    ) -> None:
+    ) -> str | None:
         """Append one message to Redis and, when durable, PostgreSQL."""
         item = MessageItem(role=role, content=content)
 
         if durable:
+            message_id = str(uuid.uuid4())
             pool = PgInstance.get_pool()
             async with pool.acquire() as conn:
                 await conn.execute(
-                    "INSERT INTO session_message (session_id, role, content) VALUES ($1, $2, $3)",
-                    session_id, role, content,
+                    """
+                    INSERT INTO session_message (message_id, session_id, role, content)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    message_id, session_id, role, content,
                 )
+        else:
+            message_id = None
 
         redis = RedisInstance.get_client()
         await redis.rpush(_messages_key(session_id), item.model_dump_json())
+        return message_id
 
     @staticmethod
     async def load_messages(session_id: str, durable: bool = True) -> list[MessageItem]:
@@ -54,7 +63,7 @@ class SessionAccessor:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT role, content FROM session_message WHERE session_id = $1 ORDER BY seq",
+                "SELECT role, content FROM session_message WHERE session_id = $1 ORDER BY create_at",
                 session_id,
             )
         messages = [MessageItem(role=r["role"], content=r["content"]) for r in rows]

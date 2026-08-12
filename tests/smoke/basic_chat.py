@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -13,11 +14,9 @@ from dynamic_agent_client.service_handler import ServiceHandler
 load_dotenv()
 
 
-SESSION_ID = "smoke-basic-chat"
-
-
 async def main():
     client = None
+    session_id = f"smoke-basic-chat-{uuid4().hex[:8]}"
 
     try:
         port = os.getenv("PORT", "7777")
@@ -25,11 +24,11 @@ async def main():
 
         client = await DynamicAgentClient.create(
             setting="You are a concise assistant.",
-            session_id=SESSION_ID,
+            session_id=session_id,
         )
         print(f"session_id: {client.session_id}")
         print(f"messages on create: {client.messages}")
-        assert client.session_id == SESSION_ID
+        assert client.session_id == session_id
         assert client.messages == [], "fresh smoke session should start empty"
 
         def on_stream(chunk: str):

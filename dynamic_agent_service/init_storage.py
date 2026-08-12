@@ -1,5 +1,8 @@
 """Initialize the PostgreSQL schema used by Dynamic Agent Service.
 
+DO NOT ALTER TABLE HERE!
+need to make sure it gives the exact tables I need
+
 Run this module explicitly before starting the service:
 
     python -m dynamic_agent_service.init_storage
@@ -45,26 +48,31 @@ CREATE TABLE IF NOT EXISTS instance_source (
 );
 
 CREATE TABLE IF NOT EXISTS session_message (
-    seq        BIGSERIAL PRIMARY KEY,
+    message_id UUID PRIMARY KEY,
+    create_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     session_id TEXT NOT NULL,
     role       TEXT NOT NULL,
     content    TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_session_message_session_id
-    ON session_message (session_id, seq);
+    ON session_message (session_id, create_at);
 
 CREATE TABLE IF NOT EXISTS openai_resource (
     resource_id TEXT PRIMARY KEY,
     model       TEXT NOT NULL,
     api_key     TEXT NOT NULL,
     base_url    TEXT NOT NULL,
+    deleted_at  TIMESTAMPTZ,
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
-    priority    INTEGER NOT NULL DEFAULT 0
+    priority    INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT openai_resource_deleted_disabled
+        CHECK (deleted_at IS NULL OR enabled = FALSE)
 );
 
 CREATE INDEX IF NOT EXISTS idx_openai_resource_enabled
     ON openai_resource (enabled, priority DESC);
+
 """
 
 

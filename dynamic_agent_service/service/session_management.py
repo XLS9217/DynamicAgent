@@ -11,14 +11,10 @@ from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
 from dynamic_agent_service.external_service.openai_resource_accessor import OpenAIResourceAccessor
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_service.service.service_structs import CreateSessionRequest, RagCache
-from dynamic_agent_service.util.setup_logging import get_my_logger
-from dynamic_agent_service.service.session_logger import SessionLogger
+from dynamic_agent_service.logging.log_interface import LogInterface
 from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
-
-logger = get_my_logger()
-agent_logger = get_my_logger("agent")
 
 def _sanitize_json(raw: str) -> str:
     """Fix common LLM JSON quirks like leading zeros (e.g. 00.5 -> 0.5)."""
@@ -33,7 +29,6 @@ def _tool_arguments_to_object(raw: str | dict | None) -> dict:
     try:
         arguments = json.loads(_sanitize_json(raw or "{}"))
     except (json.JSONDecodeError, TypeError, ValueError):
-        agent_logger.warning("Failed to parse tool arguments as JSON: %s", raw)
         return {}
     if not isinstance(arguments, dict):
         return {}
@@ -55,7 +50,6 @@ class RealtimeSession:
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
-        self.session_logger = SessionLogger(self.session_id)
         self.active_trigger_task: asyncio.Task | None = None
         self.subagent_tasks: set[asyncio.Task] = set()
 
@@ -76,12 +70,17 @@ class RealtimeSession:
     def _rag_key(self) -> str:
         return f"session:{self.session_id}:rag"
 
-    async def append_message(self, role: str, content: str) -> None:
-        await SessionAccessor.append_message(
+    async def append_message(
+        self,
+        role: str,
+        content: str,
+        durable: bool | None = None,
+    ) -> str | None:
+        return await SessionAccessor.append_message(
             self.session_id,
             role,
             content,
-            durable=self.persist,
+            durable=self.persist if durable is None else durable,
         )
 
     async def load_messages(self) -> list[dict]:
@@ -113,31 +112,17 @@ class RealtimeSession:
             ),
             setting=self.setting,
             send_tool_calls=self._send_tool_calls,
-            session_logger=self.session_logger,
+            log_session_id=self.session_id,
         )
-        logger.info(
-            "AGI initialized for session %s with OpenAI resource %s (%s)",
-            self.session_id,
-            resource.resource_id,
-            resource.model,
-        )
-        self.session_logger.log_system("agent_setup", {
-            "session_id": self.session_id,
-            "openai_resource_id": resource.resource_id,
-            "openai_model": resource.model,
-            "setting": self.setting,
-            "reconnect_keep": self.reconnect_keep,
-        })
+        LogInterface.configure_resource(self.session_id, resource.resource_id)
 
     async def attach_websocket(self, client: WebSocket):
         # Close old WebSocket if exists
         if self.client is not None:
             await self.client.close()
-            self.session_logger.log_system("websocket_replaced")
 
         self.client = client
         self.disconnect_time = None
-        self.session_logger.log_system("websocket_connected")
         MonitorEventHub.publish_nowait("session_join", session_event_payload(self))
 
         async def stream_callback(chunk: AgentResponseChunk):
@@ -149,6 +134,7 @@ class RealtimeSession:
                 assistant_text = self.agi.accumulated_assistant_text
                 if assistant_text:
                     await self.append_message("assistant", assistant_text)
+                LogInterface.complete_trigger(self.session_id)
             await self.client.send_json(chunk.model_dump(exclude_none=True))
 
         self.agi.set_stream_callback(stream_callback)
@@ -158,7 +144,6 @@ class RealtimeSession:
     def register_operator(self, operator_data: dict):
         """Forward serialized operator data to AGI for registration."""
         self.agi.register_operator(operator_data)
-        self.session_logger.log_system("operator_registered", {"operator_name": operator_data.get("name")})
 
     def is_expired(self) -> bool:
         """Check if session has been disconnected longer than reconnect_keep seconds."""
@@ -168,12 +153,11 @@ class RealtimeSession:
         """Keep WebSocket alive for receiving messages (if needed in future)."""
         try:
             while True:
-                message = await self.client.receive_json()
-                agent_logger.info("received message %s", message)
+                await self.client.receive_json()
         except WebSocketDisconnect:
-            logger.info("WebSocketDisconnect")
-        except Exception as e:
-            logger.error("Error: %s", e)
+            pass
+        except Exception:
+            pass
 
     async def trigger_agent(self, text: str, bucket_name: str = None):
         """Trigger agent with text input. Response streams via WebSocket."""
@@ -187,7 +171,11 @@ class RealtimeSession:
 
             # Fetch history before this turn's message
             history = await self.load_messages()
-            await self.append_message("user", text)
+            # A durable UUID message_id names the corresponding trigger-log file.
+            trigger_id = await self.append_message("user", text, durable=True)
+            if trigger_id is None:
+                raise RuntimeError("Failed to persist user trigger")
+            LogInterface.start_trigger(self.session_id, trigger_id)
 
             # Trigger agent with history; AGI owns the in-progress invoke state.
             await self.agi.trigger(
@@ -195,7 +183,7 @@ class RealtimeSession:
                 history=history,
             )
         except Exception as e:
-            agent_logger.error("Error processing trigger: %s", e)
+            LogInterface.complete_trigger(self.session_id)
             error_chunk = AgentResponseChunk(
                 type="agent_chunk",
                 text="Error Occurred",
@@ -323,8 +311,6 @@ class RealtimeSessionManager:
     def mark_disconnected(cls, session: RealtimeSession):
         """Mark session as disconnected, starts reconnect_keep countdown."""
         session.disconnect_time = time.time()
-        session.session_logger.log_system("websocket_disconnected")
-        logger.info("Session %s marked disconnected, will expire in %s seconds", session.session_id, session.reconnect_keep)
         MonitorEventHub.publish_nowait("session_leave", session_event_payload(session))
 
     @classmethod
@@ -333,12 +319,12 @@ class RealtimeSessionManager:
         expired = [sid for sid, session in cls._sessions.items() if session.is_expired()]
         for sid in expired:
             session = cls._sessions.pop(sid, None)
-            logger.info("Session %s expired and removed", sid)
             if session is not None:
                 try:
                     await SessionAccessor.delete_cached_messages(sid)
-                except Exception as exc:
-                    logger.warning("Failed to remove Redis messages for expired session %s: %s", sid, exc)
+                except Exception:
+                    pass
+                LogInterface.release_session(sid)
                 MonitorEventHub.publish_nowait("session_expired", session_event_payload(session))
 
     @classmethod

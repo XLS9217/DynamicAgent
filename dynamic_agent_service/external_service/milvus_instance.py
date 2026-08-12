@@ -1,7 +1,7 @@
 import os
 from typing import Optional, List, Dict, Any
 from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker
-from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger("storage")
 

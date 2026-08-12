@@ -22,7 +22,7 @@ class OpenAIResourceAccessor:
                     resource_id, model, api_key, base_url, enabled, priority
                 )
                 VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING resource_id, model, api_key, base_url, enabled, priority
+                RETURNING resource_id, model, api_key, base_url, deleted_at, enabled, priority
                 """,
                 resource_id,
                 resource.model,
@@ -39,7 +39,7 @@ class OpenAIResourceAccessor:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT resource_id, model, api_key, base_url, enabled, priority
+                SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
                 FROM openai_resource
                 WHERE resource_id = $1
                 """,
@@ -54,9 +54,9 @@ class OpenAIResourceAccessor:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT resource_id, model, api_key, base_url, enabled, priority
+                SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
                 FROM openai_resource
-                WHERE enabled = TRUE
+                WHERE enabled = TRUE AND deleted_at IS NULL
                 ORDER BY priority DESC, resource_id
                 LIMIT 1
                 """
@@ -70,16 +70,16 @@ class OpenAIResourceAccessor:
             if enabled_only:
                 rows = await conn.fetch(
                     """
-                    SELECT resource_id, model, api_key, base_url, enabled, priority
+                    SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
                     FROM openai_resource
-                    WHERE enabled = TRUE
+                    WHERE enabled = TRUE AND deleted_at IS NULL
                     ORDER BY priority DESC, resource_id
                     """
                 )
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT resource_id, model, api_key, base_url, enabled, priority
+                    SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
                     FROM openai_resource
                     ORDER BY priority DESC, resource_id
                     """
@@ -94,7 +94,7 @@ class OpenAIResourceAccessor:
                 """
                 UPDATE openai_resource
                 SET enabled = $2
-                WHERE resource_id = $1
+                WHERE resource_id = $1 AND deleted_at IS NULL
                 """,
                 resource_id,
                 enabled,
@@ -131,8 +131,8 @@ class OpenAIResourceAccessor:
                     base_url = COALESCE($4, base_url),
                     enabled = COALESCE($5, enabled),
                     priority = COALESCE($6, priority)
-                WHERE resource_id = $1
-                RETURNING resource_id, model, api_key, base_url, enabled, priority
+                WHERE resource_id = $1 AND deleted_at IS NULL
+                RETURNING resource_id, model, api_key, base_url, deleted_at, enabled, priority
                 """,
                 resource_id,
                 update.model,
@@ -148,7 +148,11 @@ class OpenAIResourceAccessor:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             result = await conn.execute(
-                "DELETE FROM openai_resource WHERE resource_id = $1",
+                """
+                UPDATE openai_resource
+                SET deleted_at = NOW(), enabled = FALSE
+                WHERE resource_id = $1 AND deleted_at IS NULL
+                """,
                 resource_id,
             )
-        return result == "DELETE 1"
+        return result == "UPDATE 1"

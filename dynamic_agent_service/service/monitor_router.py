@@ -8,15 +8,10 @@ from dynamic_agent_service.external_service.openai_resource_structs import (
     OpenAIResourceUpdate,
 )
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
-from dynamic_agent_service.util.log_accessor import (
-    clear_session_logs,
-    clear_system_log,
-    list_log_files,
-    read_log_file,
-)
+from dynamic_agent_service.logging.cache_log_accessor import CacheLogAccessor
 from dynamic_agent_service.service.monitor_events import MonitorEventHub
 from dynamic_agent_service.service.session_management import RealtimeSession, RealtimeSessionManager
-from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger()
 
@@ -35,6 +30,7 @@ def _resource_payload(resource) -> dict:
         "model": resource.model,
         "api_key": _mask_api_key(resource.api_key),
         "base_url": resource.base_url,
+        "deleted_at": resource.deleted_at,
         "enabled": resource.enabled,
         "priority": resource.priority,
     }
@@ -129,13 +125,13 @@ async def delete_openai_resource(resource_id: str):
 
 @router.get("/monitor/logs")
 async def get_logs():
-    return {"status": "ok", "files": list_log_files()}
+    return {"status": "ok", "files": CacheLogAccessor.list_log_files()}
 
 
 @router.get("/monitor/logs/content")
 async def get_log_content(path: str):
     try:
-        content = await read_log_file(path)
+        content = await CacheLogAccessor.read_log_file(path)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Log file not found")
     return {"status": "ok", **content}
@@ -143,17 +139,9 @@ async def get_log_content(path: str):
 
 @router.delete("/monitor/logs/system")
 async def delete_system_log_content():
-    if not await clear_system_log():
+    if not await CacheLogAccessor.clear_system_log():
         raise HTTPException(status_code=404, detail="System log not found")
     return {"status": "ok"}
-
-
-@router.delete("/monitor/logs/sessions/{session_id}")
-async def delete_session_log_content(session_id: str):
-    deleted = await clear_session_logs(session_id)
-    if deleted == 0:
-        raise HTTPException(status_code=404, detail="Session logs not found")
-    return {"status": "ok", "deleted": deleted}
 
 
 @router.get("/session/{session_id}/rag")

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 load_dotenv()
 
-from dynamic_agent_service.util.setup_logging import my_logger_setup, get_my_logger
+from dynamic_agent_service.logging.setup_logging import my_logger_setup, get_my_logger
 my_logger_setup()
 
 from dynamic_agent_service.service.service_router import router as session_router

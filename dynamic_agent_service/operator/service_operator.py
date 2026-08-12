@@ -18,7 +18,7 @@ Flow:
     → stored in OperatorHandler registry → menu injected into system prompt
 """
 
-from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger("tool")
 

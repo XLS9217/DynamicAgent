@@ -4,23 +4,6 @@ from types import SimpleNamespace
 from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInterface
 
 
-class _SessionLoggerStub:
-    def trigger_new(self):
-        pass
-
-    def trigger_complete(self):
-        pass
-
-    def invoke_new(self, *args, **kwargs):
-        pass
-
-    def invoke_log(self, record, *args, **kwargs):
-        pass
-
-    def log_system(self, event, data=None):
-        pass
-
-
 class _OpenAIAdapterStub:
     def __init__(self):
         self.calls = []
@@ -67,13 +50,12 @@ class AgentGeneralInterfaceTest(unittest.IsolatedAsyncioTestCase):
     def test_assigns_unique_runner_ids_and_rejects_duplicate_names(self):
         interface = AgentGeneralInterface(
             openai_adapter=object(),
-            session_logger=_SessionLoggerStub(),
         )
         child = interface._create_runner(
             name="researcher",
             openai_adapter=object(),
             stream_callback=None,
-            session_logger=_SessionLoggerStub(),
+            log_session_id=None,
         )
 
         self.assertEqual(interface._runner.name, "main")
@@ -83,14 +65,13 @@ class AgentGeneralInterfaceTest(unittest.IsolatedAsyncioTestCase):
                 name="researcher",
                 openai_adapter=object(),
                 stream_callback=None,
-                session_logger=_SessionLoggerStub(),
+                log_session_id=None,
             )
 
     async def test_triggers_named_subagent_with_selected_setting_and_operators(self):
         adapter = _OpenAIAdapterStub()
         interface = AgentGeneralInterface(
             openai_adapter=adapter,
-            session_logger=_SessionLoggerStub(),
         )
         operators = [{
             "name": "ResearchOperator",
@@ -123,7 +104,6 @@ class AgentGeneralInterfaceTest(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_duplicate_subagent_operator_names(self):
         interface = AgentGeneralInterface(
             openai_adapter=object(),
-            session_logger=_SessionLoggerStub(),
         )
 
         with self.assertRaisesRegex(

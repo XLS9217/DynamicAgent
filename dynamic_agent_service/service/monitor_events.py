@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger()
 

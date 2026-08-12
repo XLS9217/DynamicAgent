@@ -16,8 +16,7 @@ the client's actual tool implementations, without knowing implementation details
 
 from dynamic_agent_service.agent.agent_structs import AgentInvokeResult
 from dynamic_agent_service.operator.service_operator import ServiceOperator
-from dynamic_agent_service.util.setup_logging import get_my_logger
-from dynamic_agent_service.util.debug_cache_writer import debug_cache_json, debug_cache_md
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger("tool")
 
@@ -46,10 +45,6 @@ class OperatorHandler:
         service_operator = ServiceOperator.from_serialized(operator_data)
         self._operator_dict[service_operator.name] = service_operator
         print(f"Registered operator: {service_operator.name} with {len(service_operator.tools)} tools")
-
-        # debug_cache_json(f"operator_{service_operator.name}", service_operator.raw_json)
-        # debug_cache_json("operator_tools_all", self.get_tools(list(self._operator_dict.keys())))
-        # debug_cache_md("operator_menu_all", self.get_menu())
 
     def get_menu(self) -> str:
         """Return combined menu string of all operators, separated by -----."""

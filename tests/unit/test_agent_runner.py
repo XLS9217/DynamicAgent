@@ -1,26 +1,10 @@
 import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from dynamic_agent_service.agent.agent_runner import AgentRunner
 from dynamic_agent_service.agent.agent_structs import AgentInvokeResult, AgentState, AgentToolCall
-
-
-class _SessionLoggerStub:
-    def trigger_new(self):
-        pass
-
-    def trigger_complete(self):
-        pass
-
-    def invoke_new(self, *args, **kwargs):
-        pass
-
-    def invoke_log(self, record, *args, **kwargs):
-        pass
-
-    def log_system(self, event, data=None):
-        pass
 
 
 class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
@@ -30,10 +14,9 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
         runner = AgentRunner(
             name="test-agent",
             runner_id="runner-1",
-            openai_adapter=object(),
+            response_handler=SimpleNamespace(invoke=AsyncMock()),
             send_tool_calls=send_tool_calls,
             stream_callback=stream_callback,
-            session_logger=_SessionLoggerStub(),
         )
         runner._response_handler.invoke = AsyncMock(side_effect=[
             AgentInvokeResult(
@@ -69,16 +52,14 @@ class AgentRunnerTest(unittest.IsolatedAsyncioTestCase):
         parent = AgentRunner(
             name="main",
             runner_id="main-runner",
-            openai_adapter=object(),
+            response_handler=SimpleNamespace(invoke=AsyncMock()),
             stream_callback=AsyncMock(),
-            session_logger=_SessionLoggerStub(),
         )
         runner = AgentRunner(
             name="researcher",
             runner_id="child-runner",
-            openai_adapter=object(),
+            response_handler=SimpleNamespace(invoke=AsyncMock()),
             stream_callback=stream_callback,
-            session_logger=_SessionLoggerStub(),
             parent_runner=parent,
         )
 

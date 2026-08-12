@@ -14,7 +14,7 @@ from dynamic_agent_service.service.service_structs import (
     TriggerSubagentRequest,
 )
 from dynamic_agent_service.knowledge.knowledge_interface import KnowledgeInterface
-from dynamic_agent_service.util.setup_logging import get_my_logger
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger()
 

@@ -64,7 +64,7 @@ class OpenAIResourceAccessorTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(PgInstance, "get_pool", return_value=pool):
             await initialize_storage()
 
-        schema = connection.execute.await_args.args[0]
+        schema = "\n".join(call.args[0] for call in connection.execute.await_args_list)
         self.assertIn("CREATE TABLE IF NOT EXISTS bucket", schema)
         self.assertIn("CREATE TABLE IF NOT EXISTS session_message", schema)
         self.assertIn("CREATE TABLE IF NOT EXISTS openai_resource", schema)

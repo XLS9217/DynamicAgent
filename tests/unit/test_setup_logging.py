@@ -1,7 +1,7 @@
 import logging
 import unittest
 
-from dynamic_agent_service.util.setup_logging import SystemLogFilter, get_my_logger
+from dynamic_agent_service.logging.setup_logging import SystemLogFilter, get_my_logger
 
 
 class SetupLoggingTest(unittest.TestCase):

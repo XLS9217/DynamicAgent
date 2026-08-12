@@ -5,9 +5,7 @@ from openai import APIError
 from dynamic_agent_service.agent.agent_structs import AgentToolCall, AgentInvokeResult
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_client.client_struct import AgentResponseChunk
-from dynamic_agent_service.util.setup_logging import get_my_logger
-
-logger = get_my_logger("agent")
+from dynamic_agent_service.logging.log_interface import LogInterface
 
 DATA_INSPECTION_ERROR_MARKER = "DataInspectionFailed"
 SAFETY_RETRY_INSTRUCTION = (
@@ -43,9 +41,58 @@ class AgentResponseHandler:
     """
     The response wrapper for generating response
     """
-    def __init__(self, openai_adapter: OpenAIAdapter, parallel_tool_calls: bool = False):
+    def __init__(
+        self,
+        openai_adapter: OpenAIAdapter,
+        parallel_tool_calls: bool = False,
+        log_session_id: str | None = None,
+        runner_id: str = "main",
+        parent_runner_id: str | None = None,
+    ):
         self.openai_adapter = openai_adapter
         self.parallel_tool_calls = parallel_tool_calls
+        self.log_session_id = log_session_id
+        self.runner_id = runner_id
+        self.parent_runner_id = parent_runner_id
+
+    async def _invoke_once(
+        self,
+        messages: list,
+        tools: list | None,
+        stream_callback: Callable | None,
+    ) -> AgentInvokeResult:
+        try:
+            result = await self._stream_response_flow(messages, tools, stream_callback)
+        except BaseException as exc:
+            if self.log_session_id is not None:
+                await LogInterface.append_invoke_log(
+                    session_id=self.log_session_id,
+                    runner_id=self.runner_id,
+                    parent_runner_id=self.parent_runner_id,
+                    messages=messages,
+                    error=LogInterface.error(exc),
+                )
+            raise
+
+        if self.log_session_id is not None:
+            await LogInterface.append_invoke_log(
+                session_id=self.log_session_id,
+                runner_id=self.runner_id,
+                parent_runner_id=self.parent_runner_id,
+                messages=messages,
+                text=result.full_text or None,
+                tool_use={
+                    "items": [tool_call.model_dump() for tool_call in result.tool_calls],
+                } if result.tool_calls else None,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                usage_detail={
+                    "prompt_tokens": result.prompt_tokens,
+                    "completion_tokens": result.completion_tokens,
+                    "total_tokens": result.total_tokens,
+                },
+            )
+        return result
 
     async def _stream_response_flow(
             self,
@@ -149,15 +196,14 @@ class AgentResponseHandler:
         :return: AgentInvokeResponse with full text and tool calls
         """
         try:
-            return await self._stream_response_flow(messages, tools, stream_callback)
+            return await self._invoke_once(messages, tools, stream_callback)
         except Exception as exc:
             if not _is_data_inspection_failed(exc):
                 raise
 
-            logger.warning("LLM output rejected by provider inspection: %s", exc)
 
         try:
-            return await self._stream_response_flow(
+            return await self._invoke_once(
                 _with_safety_retry_instruction(messages),
                 tools,
                 stream_callback,
@@ -166,7 +212,6 @@ class AgentResponseHandler:
             if not _is_data_inspection_failed(exc):
                 raise
 
-            logger.warning("LLM safety retry rejected by provider inspection: %s", exc)
 
             if stream_callback:
                 await stream_callback(AgentResponseChunk(type="agent_chunk", text=DATA_INSPECTION_FALLBACK))

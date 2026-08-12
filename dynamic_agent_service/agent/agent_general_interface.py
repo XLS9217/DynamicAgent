@@ -3,6 +3,7 @@ import uuid
 from typing import Awaitable, Callable
 
 from dynamic_agent_service.agent.agent_runner import AgentRunner
+from dynamic_agent_service.agent.agent_response_handler import AgentResponseHandler
 from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 
@@ -31,7 +32,7 @@ class AgentGeneralInterface:
         openai_adapter: OpenAIAdapter,
         send_tool_calls: Callable[[str, list[AgentToolCall]], Awaitable[None]] | None = None,
         stream_callback: Callable | None = None,
-        session_logger=None,
+        log_session_id: str | None = None,
     ):
         if openai_adapter is None:
             raise ValueError("A database-resolved OpenAI adapter is required")
@@ -42,7 +43,7 @@ class AgentGeneralInterface:
         self._operator_list: list[dict] = []
         self._send_tool_calls = send_tool_calls
         self._stream_callback = stream_callback
-        self._session_logger = session_logger
+        self._log_session_id = log_session_id
         self._runner_by_id: dict[str, AgentRunner] = {}
         self._runner_id_by_name: dict[str, str] = {}
         self._subagent_config_by_runner_id: dict[str, dict] = {}
@@ -50,7 +51,7 @@ class AgentGeneralInterface:
             name="main",
             openai_adapter=openai_adapter,
             stream_callback=stream_callback,
-            session_logger=session_logger,
+            log_session_id=log_session_id,
         )
 
     @property
@@ -91,13 +92,13 @@ class AgentGeneralInterface:
         setting: str = "",
         send_tool_calls: Callable[[str, list[AgentToolCall]], Awaitable[None]] | None = None,
         stream_callback: Callable | None = None,
-        session_logger=None,
+        log_session_id: str | None = None,
     ) -> "AgentGeneralInterface":
         interface = cls(
             openai_adapter=openai_adapter,
             send_tool_calls=send_tool_calls,
             stream_callback=stream_callback,
-            session_logger=session_logger,
+            log_session_id=log_session_id,
         )
         interface._setting = setting
         return interface
@@ -163,7 +164,7 @@ class AgentGeneralInterface:
             runner_id=runner_id,
             openai_adapter=self.openai_adapter,
             stream_callback=None,
-            session_logger=self._session_logger,
+            log_session_id=self._log_session_id,
             parent_runner=parent_runner,
         )
         self._subagent_config_by_runner_id[runner_id] = {
@@ -296,7 +297,7 @@ class AgentGeneralInterface:
         name: str,
         openai_adapter: OpenAIAdapter,
         stream_callback: Callable | None,
-        session_logger,
+        log_session_id: str | None,
         runner_id: str | None = None,
         parent_runner: AgentRunner | None = None,
     ) -> AgentRunner:
@@ -312,13 +313,18 @@ class AgentGeneralInterface:
                 raise RuntimeError("Tool call sender is not configured")
             await self._send_tool_calls(assigned_runner_id, tool_calls)
 
+        response_handler = AgentResponseHandler(
+            openai_adapter=openai_adapter,
+            log_session_id=log_session_id,
+            runner_id=assigned_runner_id,
+            parent_runner_id=parent_runner.runner_id if parent_runner is not None else None,
+        )
         runner = AgentRunner(
             name=name,
             runner_id=assigned_runner_id,
-            openai_adapter=openai_adapter,
+            response_handler=response_handler,
             send_tool_calls=send_runner_tool_calls if self._send_tool_calls is not None else None,
             stream_callback=stream_callback,
-            session_logger=session_logger,
             parent_runner=parent_runner,
         )
         self._runner_by_id[assigned_runner_id] = runner

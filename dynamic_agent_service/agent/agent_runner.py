@@ -74,10 +74,20 @@ class AgentRunner:
             stream_callback=self._handle_response_chunk,
         )
 
-        await self._emit_chunk(AgentResponseChunk(type="agent_chunk", text="", invoked=True))
-
         if invoke_response.full_text:
             self._full_assistant_text += invoke_response.full_text
+
+        finished = not invoke_response.tool_calls
+        await self._emit_chunk(AgentResponseChunk(
+            type="agent_chunk",
+            text=(
+                self._full_assistant_text
+                if finished and self.parent_runner is not None
+                else ""
+            ),
+            invoked=True,
+            finished=finished,
+        ))
 
         if invoke_response.tool_calls:
             if self._send_tool_calls is None:
@@ -90,17 +100,10 @@ class AgentRunner:
 
         if invoke_response.full_text:
             self._running_message_list.append({"role": "assistant", "content": invoke_response.full_text})
-        await self._emit_chunk(AgentResponseChunk(
-            type="agent_chunk",
-            text=self._full_assistant_text if self.parent_runner is not None else "",
-            finished=True,
-        ))
         self._complete_run()
 
     async def _handle_response_chunk(self, chunk: AgentResponseChunk) -> None:
         """Forward model stream chunks with runner metadata."""
-        if self.parent_runner is not None and chunk.text:
-            return
         await self._emit_chunk(chunk)
 
     async def _emit_chunk(self, chunk: AgentResponseChunk) -> None:

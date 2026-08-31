@@ -13,7 +13,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
-from dynamic_agent_client import DynamicAgentClient, AgentOperator, agent_tool, description, flow
+from dynamic_agent_client import (
+    AgentEvent,
+    AgentOperator,
+    DynamicAgentClient,
+    ToolExecutionEvent,
+    agent_tool,
+    description,
+    flow,
+)
 from dynamic_agent_client.service_handler import ServiceHandler
 
 load_dotenv()
@@ -141,7 +149,9 @@ async def main():
         assert client.session_id == SESSION_ID
         assert client.messages == [], "fresh smoke session should start empty"
 
-        client.on_tool_call(lambda tool_name, arguments: tool_calls.append((tool_name, arguments)))
+        def on_event(event: AgentEvent) -> None:
+            if isinstance(event, ToolExecutionEvent) and event.status == "started":
+                tool_calls.append((event.name, event.arguments))
 
         weather_operator = CityWeatherOperator(weather_reports)
         temperature_operator = BodyTemperatureOperator()
@@ -153,7 +163,8 @@ async def main():
         response = await client.trigger(
             f"First list the available cities, then get the weather report for {target_city}. "
             f"Also classify this body temperature: {body_celsius} Celsius. "
-            "Reply with only the city weather report and body temperature classification."
+            "Reply with only the city weather report and body temperature classification.",
+            on_event=on_event,
         )
         print(f"response: {response}")
 

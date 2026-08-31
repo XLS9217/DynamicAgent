@@ -254,34 +254,6 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
-    async def inbound(
-        cls,
-        instruction_query: str,
-        knowledge_text: str,
-        bucket_name: str,
-        source_metadata: dict = None,
-        entity_limit_one: bool = False,
-        use_existing_blueprint: bool = False,
-    ):
-        """Inbound knowledge into a bucket via HTTP POST."""
-        # TO-DO: For large texts this can exceed the timeout. Design an async approach
-        # (e.g. return task_id immediately, push result via WebSocket channel).
-        resp = await cls._http.post(
-            f"{cls._server_addr}/knowledge/inbound",
-            json={
-                "instruction_query": instruction_query,
-                "knowledge_text": knowledge_text,
-                "bucket_name": bucket_name,
-                "source_metadata": source_metadata,
-                "entity_limit_one": entity_limit_one,
-                "use_existing_blueprint": use_existing_blueprint,
-            },
-            timeout=300.0,
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    @classmethod
     async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
         """Retrieve knowledge from a bucket via HTTP POST. Returns (results, analytics)."""
         resp = await cls._http.post(

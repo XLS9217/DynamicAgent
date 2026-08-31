@@ -98,17 +98,55 @@ await client.add_operator(WeatherOperator())
 answer = await client.trigger("What is the weather in Shanghai?")
 ```
 
+## Subscribing to agent output
+
+The client provides two levels of agent subscription. `on_chunk` receives every
+typed chunk from main runners and subagents. Consumers can distinguish them with
+`parent_runner_id`; the client does not filter subagent chunks.
+
+`on_event` receives high-level typed events independently of `on_chunk`. An
+`AgentInvocationEvent` is emitted after each provider-model invocation and includes
+accumulated text, token usage, runner relationships, and `finished`. A value of
+`finished=True` means that invocation completed its runner; `False` means it
+produced tool calls and the runner will invoke the model again after receiving
+their results. A `ToolExecutionEvent` is emitted when a tool starts and when it
+succeeds or fails.
+
+```python
+from dynamic_agent_client import (
+    AgentEvent,
+    AgentInvocationEvent,
+    AgentResponseChunk,
+    ToolExecutionEvent,
+)
+
+
+def handle_chunk(chunk: AgentResponseChunk) -> None:
+    if chunk.text and chunk.parent_runner_id is None:
+        print(chunk.text, end="", flush=True)
+
+
+def handle_event(event: AgentEvent) -> None:
+    if isinstance(event, AgentInvocationEvent):
+        print(event.runner_id, event.total_tokens, event.finished)
+    elif isinstance(event, ToolExecutionEvent):
+        print(event.name, event.status)
+
+
+answer = await client.trigger(
+    "What is the weather in Shanghai?",
+    on_chunk=handle_chunk,
+    on_event=handle_event,
+)
+```
+
 `@agent_tool` builds the function schema from the method signature and docstring.
 Use `count_limit=N` to limit a tool to `N` executions per trigger. When the limit
 is exceeded, the tool returns a clear limit-reached message and the underlying
 method is not called. Counters reset at the start of the next `client.trigger(...)`.
 
-You can observe tool execution with client hooks:
-
-```python
-client.on_tool_call(lambda tool_name, arguments: print(tool_name, arguments))
-client.on_tool_result(lambda tool_name, arguments, result: print(tool_name, result))
-```
+Tool execution is observed through `on_event` using the same subscription as
+model invocations.
 
 ### RAG operator
 

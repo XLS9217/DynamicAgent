@@ -11,9 +11,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from dotenv import load_dotenv
 
 from dynamic_agent_client import (
+    AgentEvent,
+    AgentInvocationEvent,
     AgentOperator,
     DynamicAgentClient,
     SubagentOperator,
+    ToolExecutionEvent,
     agent_tool,
     description,
 )
@@ -246,7 +249,7 @@ class ReplyOperator(AgentOperator):
 async def main():
     client = None
     tool_calls: list[tuple[str, dict]] = []
-    agent_events: list[dict] = []
+    agent_events: list[AgentInvocationEvent] = []
 
     search_operator = SearchOperator(MOCK_POSTS)
     stat_operator = StatOperator(MOCK_POSTS)
@@ -265,7 +268,11 @@ async def main():
             session_id=f"smoke-subagent-two-{uuid4().hex[:8]}",
             persist=False,
         )
-        client.on_tool_call(lambda name, arguments: tool_calls.append((name, arguments)))
+        def on_event(event: AgentEvent) -> None:
+            if isinstance(event, AgentInvocationEvent):
+                agent_events.append(event)
+            elif isinstance(event, ToolExecutionEvent) and event.status == "started":
+                tool_calls.append((event.name, event.arguments))
 
         registration = await client.add_operator(SubagentOperator([
             search_operator,
@@ -289,7 +296,7 @@ async def main():
             "a thank-you reply to the highest-ratio post and a polite 'please do not do that' "
             "reply to the aggressive comment.\n"
             "5. Return a concise summary of both sent replies.",
-            on_agent_event=lambda event: agent_events.append(event),
+            on_event=on_event,
         )
         print(f"response: {response}")
 
@@ -327,10 +334,10 @@ async def main():
 
         subagent_finishes = [
             event for event in agent_events
-            if event.get("finished") and event.get("parent_runner_id")
+            if event.finished and event.parent_runner_id
         ]
         assert len(subagent_finishes) == 2
-        assert all(event.get("parent_tool_call_id") for event in subagent_finishes)
+        assert all(event.parent_tool_call_id for event in subagent_finishes)
         assert response, "expected a final main-agent response"
 
         print("ALL PASSED")

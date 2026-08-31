@@ -198,27 +198,6 @@ async def delete_bucket(bucket_name: str):
     return {"status": "ok", "message": message}
 
 
-class KnowledgeInboundRequest(BaseModel):
-    instruction_query: str
-    knowledge_text: str
-    bucket_name: str
-    source_metadata: dict | None = None
-    entity_limit_one: bool = False
-    use_existing_blueprint: bool = False
-
-@router.post("/knowledge/inbound")
-async def knowledge_inbound(body: KnowledgeInboundRequest):
-    result = await KnowledgeInterface.inbound(
-        instruction_query=body.instruction_query,
-        knowledge_text=body.knowledge_text,
-        bucket_name=body.bucket_name,
-        source_metadata=body.source_metadata,
-        entity_limit_one=body.entity_limit_one,
-        use_existing_blueprint=body.use_existing_blueprint,
-    )
-    return {"status": "ok", "message": result}
-
-
 class KnowledgeRetrieveRequest(BaseModel):
     query: str
     bucket_name: str

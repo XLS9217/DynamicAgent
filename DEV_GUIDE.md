@@ -9,5 +9,6 @@ use .env for
 
 - smoke is mainly for the client sdk
 - integration
+  - for data base write atom transaction so it's easy to roll back
 - test_util
 - unit

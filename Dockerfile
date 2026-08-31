@@ -7,6 +7,7 @@ ENV UV_LINK_MODE=copy
 
 COPY . .
 
+RUN uv build --package dynamic-agent-client --out-dir /app/sdk_dist
 RUN uv sync --frozen --no-dev
 
 EXPOSE 7777

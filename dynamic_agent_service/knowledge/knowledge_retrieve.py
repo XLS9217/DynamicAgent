@@ -1,5 +1,5 @@
 """
-Knowledge retrieval workflow for searching and reconstructing knowledge from the bucket.
+Search and reconstruct knowledge from a bucket.
 
 Flow:
 1. Decide similarity focus (embedding vs BM25) based on query
@@ -7,8 +7,20 @@ Flow:
 3. Search Milvus for similar knowledge nodes (scoped to bucket) with weighted scoring
 4. Group results by instance_id and merge into partial blueprints
 """
-from workflow.workflow_base import WorkflowBase
+from datetime import datetime
+import inspect
+import json
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
+from dynamic_agent_service.external_service.openai_resource_accessor import (
+    OpenAIResourceAccessor,
+)
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
+from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.knowledge.knowledge_accessor import KnowledgeAccessor
 
 DECIDE_PROMPT = """Analyze this search query and decide which similarity method should be prioritized:
@@ -23,25 +35,95 @@ Options:
 Respond with ONLY one word: embedding, bm25, or neutral"""
 
 
-class KnowledgeRetrieveWorkflow(WorkflowBase):
+class KnowledgeRetriever:
     def __init__(self):
-        super().__init__()
         self.query = ""
         self.bucket_name = ""
         self.top_k = 10
         self.score_threshold = 0.15
-        self.knowledge_accessor = None
+        self.knowledge_accessor = KnowledgeAccessor
         self._embedding_weight = 0.5
         self._bm25_weight = 0.5
         self._similarity_focus = "neutral"
+        self._openai_adapter = None
+        self._log_path: Path | None = None
 
-    async def build(self, query: str, bucket_name: str, top_k: int = 10, score_threshold: float = 0.3, knowledge_accessor=None):
+    async def build(
+        self,
+        query: str,
+        bucket_name: str,
+        top_k: int = 10,
+        score_threshold: float = 0.3,
+    ):
+        load_dotenv()
+        try:
+            PgInstance.get_pool()
+        except RuntimeError:
+            await PgInstance.initialize()
+
+        resource = await OpenAIResourceAccessor.get_active_resource()
+        if resource is None:
+            raise RuntimeError("No enabled OpenAI resource is configured")
+        self._openai_adapter = OpenAIAdapter(
+            api_key=resource.api_key,
+            base_url=resource.base_url,
+            model=resource.model,
+        )
+
+        cache_dir = os.getenv("CACHE_DIR")
+        self._log_path = (
+            Path(cache_dir) / "KnowledgeRetriever.jsonl"
+            if cache_dir
+            else Path.cwd() / "KnowledgeRetriever.jsonl"
+        )
+        self._log_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log_path.write_text("", encoding="utf-8")
+
         self.query = query
         self.bucket_name = bucket_name
         self.top_k = top_k
         self.score_threshold = score_threshold
-        self.knowledge_accessor = knowledge_accessor
         return self
+
+    def append_log(self, message: str) -> None:
+        record = {
+            "time": datetime.now().isoformat(),
+            "category": "SYSTEM",
+            "workflow": self.__class__.__name__,
+            "caller_workflow": "",
+            "function_name": inspect.stack()[1].function,
+            "message": message,
+        }
+        self._write_log(record)
+
+    async def invoke_agent(self, messages: list) -> str:
+        caller = inspect.stack()[1].function
+        self._write_log(
+            {
+                "time": datetime.now().isoformat(),
+                "category": "AGENT",
+                "workflow": self.__class__.__name__,
+                "caller_workflow": "",
+                "function_name": caller,
+                "messages": messages,
+            }
+        )
+        response = await self._openai_adapter.async_get_response(messages)
+        self._write_log(
+            {
+                "time": datetime.now().isoformat(),
+                "category": "AGENT",
+                "workflow": self.__class__.__name__,
+                "caller_workflow": "",
+                "function_name": caller,
+                "message": response,
+            }
+        )
+        return response
+
+    def _write_log(self, record: dict) -> None:
+        with self._log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     async def _decide_similarity_focus(self):
         """

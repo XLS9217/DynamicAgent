@@ -1,0 +1,49 @@
+{
+  "blueprint": {
+    "name": "CybersecurityProduct",
+    "description": "A cybersecurity product and its demonstrated behavior",
+    "attributes": {
+      "name": {
+        "description": "Product name",
+        "is_identifier": true
+      },
+      "capabilities": {
+        "description": "Threats or suspicious behavior detected by the product"
+      },
+      "response": {
+        "description": "Action taken after a threat is detected"
+      },
+      "evidence": {
+        "description": "Observed evaluation evidence"
+      }
+    }
+  },
+  "instances": [
+    {
+      "instance_id": "smoke-sentinel-harbor",
+      "source_metadata": {
+        "source": "synthetic-smoke-fixture",
+        "record": "sentinel-harbor"
+      },
+      "values": {
+        "name": "Sentinel Harbor",
+        "capabilities": "Detects suspicious network activity and credential theft attempts.",
+        "response": "Automatically isolates compromised endpoints from the network.",
+        "evidence": "In a controlled evaluation, it blocked credential theft and lateral movement."
+      }
+    },
+    {
+      "instance_id": "smoke-aegis-lantern",
+      "source_metadata": {
+        "source": "synthetic-smoke-fixture",
+        "record": "aegis-lantern"
+      },
+      "values": {
+        "name": "Aegis Lantern",
+        "capabilities": "Detects malicious email attachments and phishing links.",
+        "response": "Quarantines the message and alerts the security team.",
+        "evidence": "In a controlled evaluation, it stopped a simulated invoice phishing campaign."
+      }
+    }
+  ]
+}

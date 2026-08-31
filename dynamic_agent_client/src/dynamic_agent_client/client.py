@@ -5,11 +5,19 @@ import asyncio
 import inspect
 import json
 from typing import Callable
+from uuid import uuid4
 
 import websockets
 from pydantic import ValidationError
 
-from .client_struct import AgentResponseChunk, AgentToolCallMessage, service_to_client_message_adapter
+from .client_struct import (
+    AgentEvent,
+    AgentInvocationEvent,
+    AgentResponseChunk,
+    AgentToolCallMessage,
+    ToolExecutionEvent,
+    service_to_client_message_adapter,
+)
 from .operator.agent_operator_base import AgentOperator
 from .service_handler import ServiceHandler
 
@@ -22,14 +30,10 @@ class DynamicAgentClient:
         self.websocket = None
         self.messages: list = []
 
-        self._on_stream: Callable[[str], None] | None = None
-        self._on_invoke: Callable[[str], None] | None = None
-        self._on_tool_call: Callable[[str, dict], None] | None = None
-        self._on_tool_result: Callable[[str, dict, any], None] | None = None
-        self._on_agent_event: Callable[[dict], None] | None = None
-        self._show_subagent_stream = False
+        self._on_chunk: Callable[[AgentResponseChunk], None] | None = None
+        self._on_event: Callable[[AgentEvent], None] | None = None
         self._accumulated_text = ""
-        self._invoke_text = ""
+        self._active_invocations: dict[str, AgentInvocationEvent] = {}
         self._response_done = asyncio.Event()
         self._listen_task = None
         self._tool_tasks: set[asyncio.Task] = set()
@@ -80,23 +84,19 @@ class DynamicAgentClient:
                     continue
 
                 if isinstance(service_message, AgentResponseChunk):
-                    data = service_message.model_dump(exclude_none=True)
                     text = service_message.text
                     is_main_runner = service_message.runner_id in (None, self.runner_id)
-                    is_subagent_stream = (
-                        service_message.parent_runner_id is not None
-                        and not service_message.invoked
-                        and not service_message.finished
-                    )
 
-                    if (
-                        self._on_agent_event
-                        and (self._show_subagent_stream or not is_subagent_stream)
-                    ):
+                    invocation = self._accumulate_invocation(service_message)
+
+                    if self._on_chunk:
                         try:
-                            self._on_agent_event(data)
+                            self._on_chunk(service_message)
                         except Exception as exc:
-                            print(f"[agent_event] WARNING: callback failed: {exc}")
+                            print(f"[agent_chunk] WARNING: callback failed: {exc}")
+
+                    if invocation is not None:
+                        self._emit_event(invocation)
 
                     if service_message.finished and service_message.parent_tool_call_id:
                         await ServiceHandler.send_tool_result(
@@ -109,14 +109,6 @@ class DynamicAgentClient:
 
                     if text and is_main_runner:
                         self._accumulated_text += text
-                        self._invoke_text += text
-                        if self._on_stream:
-                            self._on_stream(text)
-
-                    if service_message.invoked and is_main_runner:
-                        if self._on_invoke:
-                            self._on_invoke(self._invoke_text)
-                        self._invoke_text = ""
 
                     if service_message.finished and is_main_runner:
                         self._response_done.set()
@@ -130,6 +122,54 @@ class DynamicAgentClient:
             pass
 
         self._connected = False
+
+    def _runner_key(self, runner_id: str | None) -> str:
+        """Return a stable local key for a main or subagent runner."""
+        return runner_id or self.runner_id or "main"
+
+    def _accumulate_invocation(
+        self,
+        chunk: AgentResponseChunk,
+    ) -> AgentInvocationEvent | None:
+        """Build one high-level invocation from a runner's streamed chunks."""
+        runner_id = self._runner_key(chunk.runner_id)
+        if chunk.finished and not chunk.invoked:
+            return None
+        invocation = self._active_invocations.get(runner_id)
+        if invocation is None:
+            invocation = AgentInvocationEvent(
+                session_id=self.session_id,
+                invocation_id=uuid4().hex,
+                runner_id=runner_id,
+            )
+            self._active_invocations[runner_id] = invocation
+
+        if chunk.runner_name is not None:
+            invocation.runner_name = chunk.runner_name
+        if chunk.parent_runner_id is not None:
+            invocation.parent_runner_id = chunk.parent_runner_id
+        if chunk.parent_tool_call_id is not None:
+            invocation.parent_tool_call_id = chunk.parent_tool_call_id
+        if chunk.text and not chunk.finished:
+            invocation.text += chunk.text
+        if chunk.prompt_tokens or chunk.completion_tokens or chunk.total_tokens:
+            invocation.prompt_tokens = chunk.prompt_tokens
+            invocation.completion_tokens = chunk.completion_tokens
+            invocation.total_tokens = chunk.total_tokens
+
+        if chunk.invoked:
+            self._active_invocations.pop(runner_id, None)
+            invocation.finished = chunk.finished
+            return invocation
+        return None
+
+    def _emit_event(self, event: AgentEvent) -> None:
+        """Emit one high-level agent or tool lifecycle event."""
+        if self._on_event:
+            try:
+                self._on_event(event)
+            except Exception as exc:
+                print(f"[agent_event] WARNING: callback failed: {exc}")
 
     async def _handle_tool_call(self, tool_call: AgentToolCallMessage):
         llm_tool_name = tool_call.name
@@ -146,33 +186,44 @@ class DynamicAgentClient:
 
         ok = True
         callable_func = None
+        error = None
+        self._emit_event(ToolExecutionEvent(
+            session_id=self.session_id,
+            runner_id=runner_id,
+            tool_call_id=tool_call_id,
+            name=llm_tool_name,
+            arguments=arguments,
+            status="started",
+        ))
         try:
             callable_func = self.tool_map[runner_id][llm_tool_name]
             callable_func.operator.session_id = self.session_id
             callable_func.operator.runner_id = runner_id
             callable_func.operator.tool_call_id = tool_call_id
-            if self._on_tool_call:
-                try:
-                    self._on_tool_call(llm_tool_name, arguments)
-                except Exception as exc:
-                    print(f"[tool_call] WARNING: on_tool_call hook failed: {exc}")
             result = callable_func(**arguments)
             if inspect.isawaitable(result):
                 result = await result
         except KeyError:
             ok = False
             result = f"Tool not found: {llm_tool_name}"
+            error = result
             print(f"[tool_call] ERROR: {result}")
         except Exception as exc:
             ok = False
             result = f"Error: Tool execution failed: {exc}"
+            error = str(exc)
             print(f"[tool_call] ERROR: {result}")
 
-        if self._on_tool_result:
-            try:
-                self._on_tool_result(llm_tool_name, arguments, result)
-            except Exception as exc:
-                print(f"[tool_call] WARNING: on_tool_result hook failed: {exc}")
+        self._emit_event(ToolExecutionEvent(
+            session_id=self.session_id,
+            runner_id=runner_id,
+            tool_call_id=tool_call_id,
+            name=llm_tool_name,
+            arguments=arguments,
+            status="succeeded" if ok else "failed",
+            result=result if ok else None,
+            error=error,
+        ))
 
         if result is None:
             return
@@ -188,20 +239,16 @@ class DynamicAgentClient:
     async def trigger(
         self,
         text: str,
-        on_stream: Callable[[str], None] = None,
-        on_invoke: Callable[[str], None] = None,
+        on_chunk: Callable[[AgentResponseChunk], None] = None,
+        on_event: Callable[[AgentEvent], None] = None,
         bucket_name: str = None,
-        on_agent_event: Callable[[dict], None] = None,
-        show_subagent_stream: bool = False,
     ):
         await self._ensure_connected()
 
-        self._on_stream = on_stream
-        self._on_invoke = on_invoke
-        self._on_agent_event = on_agent_event
-        self._show_subagent_stream = show_subagent_stream
+        self._on_chunk = on_chunk
+        self._on_event = on_event
         self._accumulated_text = ""
-        self._invoke_text = ""
+        self._active_invocations.clear()
         self._response_done.clear()
         for operator in self._operators:
             operator.reset_tool_counters()
@@ -226,20 +273,6 @@ class DynamicAgentClient:
         """Delete persisted chat messages for a session."""
         return await ServiceHandler.delete_session(session_id)
 
-    def on_tool_call(self, callback: Callable[[str, dict], None]):
-        """
-        Set callback for when a tool is about to execute.
-        """
-        self._on_tool_call = callback
-        return self
-
-    def on_tool_result(self, callback: Callable[[str, dict, any], None]):
-        """
-        Set callback for after a tool execution completes.
-        """
-        self._on_tool_result = callback
-        return self
-
     @classmethod
     async def create_bucket(cls, name: str, description: str = ""):
         """Create a new bucket for storing knowledge."""
@@ -254,26 +287,6 @@ class DynamicAgentClient:
     async def delete_bucket(cls, name: str):
         """Delete a bucket and all its contents."""
         return await ServiceHandler.delete_bucket(name)
-
-    @classmethod
-    async def inbound(
-        cls,
-        instruction_query: str,
-        knowledge_text: str,
-        bucket_name: str,
-        source_metadata: dict = None,
-        entity_limit_one: bool = False,
-        use_existing_blueprint: bool = False,
-    ):
-        """Inbound knowledge into a bucket."""
-        return await ServiceHandler.inbound(
-            instruction_query,
-            knowledge_text,
-            bucket_name,
-            source_metadata,
-            entity_limit_one,
-            use_existing_blueprint,
-        )
 
     async def _ensure_connected(self):
         """Ensure websocket is connected, reconnect if needed."""

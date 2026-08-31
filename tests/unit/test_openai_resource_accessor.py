@@ -71,6 +71,30 @@ class OpenAIResourceAccessorTest(unittest.IsolatedAsyncioTestCase):
         transaction.__aenter__.assert_awaited_once()
         transaction.__aexit__.assert_awaited_once()
 
+    async def test_list_including_disabled_still_excludes_deleted_resources(self):
+        connection = MagicMock()
+        connection.fetch = AsyncMock(return_value=[])
+        pool = _pool_with_connection(connection)
+
+        with patch.object(PgInstance, "get_pool", return_value=pool):
+            await OpenAIResourceAccessor.list_resources(enabled_only=False)
+
+        query = connection.fetch.await_args.args[0]
+        self.assertIn("WHERE deleted_at IS NULL", query)
+
+    async def test_delete_is_idempotent_for_an_existing_resource(self):
+        connection = MagicMock()
+        connection.execute = AsyncMock(return_value="UPDATE 1")
+        pool = _pool_with_connection(connection)
+
+        with patch.object(PgInstance, "get_pool", return_value=pool):
+            deleted = await OpenAIResourceAccessor.delete_resource("resource-1")
+
+        self.assertTrue(deleted)
+        query = connection.execute.await_args.args[0]
+        self.assertIn("COALESCE(deleted_at, NOW())", query)
+        self.assertNotIn("deleted_at IS NULL", query)
+
 
 if __name__ == "__main__":
     unittest.main()

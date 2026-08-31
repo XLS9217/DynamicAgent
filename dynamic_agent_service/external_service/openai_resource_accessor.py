@@ -81,6 +81,7 @@ class OpenAIResourceAccessor:
                     """
                     SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
                     FROM openai_resource
+                    WHERE deleted_at IS NULL
                     ORDER BY priority DESC, resource_id
                     """
                 )
@@ -150,8 +151,8 @@ class OpenAIResourceAccessor:
             result = await conn.execute(
                 """
                 UPDATE openai_resource
-                SET deleted_at = NOW(), enabled = FALSE
-                WHERE resource_id = $1 AND deleted_at IS NULL
+                SET deleted_at = COALESCE(deleted_at, NOW()), enabled = FALSE
+                WHERE resource_id = $1
                 """,
                 resource_id,
             )

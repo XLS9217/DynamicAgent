@@ -17,7 +17,6 @@ class CacheLogAccessor:
     cache_log_root: ClassVar[Path] = Path(
         os.getenv("CACHE_DIR") or ".cache"
     ).resolve()
-    max_log_bytes: ClassVar[int] = 2 * 1024 * 1024
     log_suffixes: ClassVar[set[str]] = {".jsonl", ".log", ".md"}
     _trigger_locks: ClassVar[dict[str, asyncio.Lock]] = {}
 
@@ -61,14 +60,13 @@ class CacheLogAccessor:
     @classmethod
     async def read_log_file(cls, relative_path: str) -> dict:
         path = cls.resolve_log_path(relative_path)
-        size = path.stat().st_size
         async with aiofiles.open(
             path,
             mode="r",
             encoding="utf-8",
             errors="replace",
         ) as file:
-            content = await file.read(cls.max_log_bytes)
+            content = await file.read()
 
         if path.suffix.lower() == ".jsonl":
             entries = []
@@ -83,14 +81,14 @@ class CacheLogAccessor:
                 "path": relative_path,
                 "format": "jsonl",
                 "entries": entries,
-                "truncated": size > cls.max_log_bytes,
+                "truncated": False,
             }
 
         return {
             "path": relative_path,
             "format": "text",
             "content": content,
-            "truncated": size > cls.max_log_bytes,
+            "truncated": False,
         }
 
     @classmethod

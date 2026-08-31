@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -118,6 +119,20 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["completion_tokens"], 3)
         self.assertEqual(record["usage_detail"]["total_tokens"], 11)
         self.assertIsNone(record["error"])
+
+    async def test_large_log_file_is_read_in_full(self):
+        log_dir = Path(self.temp_dir.name) / "trigger_log"
+        log_dir.mkdir()
+        payload = "x" * (2 * 1024 * 1024 + 1)
+        (log_dir / "large.jsonl").write_text(
+            '{"payload":"' + payload + '"}\n',
+            encoding="utf-8",
+        )
+
+        result = await CacheLogAccessor.read_log_file("trigger_log/large.jsonl")
+
+        self.assertFalse(result["truncated"])
+        self.assertEqual(result["entries"][0]["payload"], payload)
 
 
 if __name__ == "__main__":

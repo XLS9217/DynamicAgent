@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Temporary local endpoint test with credentials
+/test_lan_model.py

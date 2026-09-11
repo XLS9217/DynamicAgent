@@ -9,6 +9,7 @@ import os
 import random
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -27,7 +28,7 @@ from dynamic_agent_client.service_handler import ServiceHandler
 load_dotenv()
 
 
-SESSION_ID = "smoke-two-operator"
+SESSION_ID = "smoke-two-operator-" + uuid4().hex[:8]
 
 
 class CityWeatherOperator(AgentOperator):

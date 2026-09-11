@@ -223,8 +223,10 @@ class AgentGeneralInterface:
             await completed.wait()
             return result["text"]
         finally:
-            runner.stream_callback = None
-            runner.parent_tool_call_id = None
+            # A completion callback may already have allowed a new subagent run.
+            if runner.stream_callback is stream_callback:
+                runner.stream_callback = None
+                runner.parent_tool_call_id = None
 
     def register_operator(self, operator_data: dict) -> None:
         self._operator_list.append(operator_data)

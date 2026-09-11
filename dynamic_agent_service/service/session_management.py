@@ -108,15 +108,21 @@ class RealtimeSession:
         self.disconnect_time = None
 
         async def stream_callback(chunk: AgentResponseChunk):
+            """Persist completed turns and release ownership before sending completion."""
             if (
                 chunk.finished
                 and self.agi is not None
                 and chunk.runner_id == self.agi.runner_id
             ):
+                # Tool continuations also need to stay busy while their text is saved.
+                completion_task = asyncio.current_task()
+                self.active_trigger_task = completion_task
                 assistant_text = self.agi.accumulated_assistant_text
                 if assistant_text:
                     await self.append_message("assistant", assistant_text)
                 LogInterface.complete_trigger(self.session_id)
+                if self.active_trigger_task is completion_task:
+                    self.active_trigger_task = None
             await self.client.send_json(chunk.model_dump(exclude_none=True))
 
         self.agi.set_stream_callback(stream_callback)
@@ -148,6 +154,7 @@ class RealtimeSession:
         if self.agi.state is not AgentState.IDLE:
             raise RuntimeError(f"Agent is {self.agi.state}")
 
+        current_task = asyncio.current_task()
         try:
             message = {"type": "invoke", "text": text}
 
@@ -163,7 +170,11 @@ class RealtimeSession:
                 history=history,
             )
         except Exception as e:
+            if self.active_trigger_task not in (None, current_task):
+                raise
             LogInterface.complete_trigger(self.session_id)
+            if self.active_trigger_task is current_task:
+                self.active_trigger_task = None
             error_chunk = AgentResponseChunk(
                 type="agent_chunk",
                 text="Error Occurred",
@@ -174,7 +185,9 @@ class RealtimeSession:
             if self.client is not None:
                 await self.client.send_json(error_chunk.model_dump())
         finally:
-            self.active_trigger_task = None
+            # Completion may already have allowed another trigger to take ownership.
+            if self.active_trigger_task is current_task:
+                self.active_trigger_task = None
 
     async def receive_tool_result(
         self,

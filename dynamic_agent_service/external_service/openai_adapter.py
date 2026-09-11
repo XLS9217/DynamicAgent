@@ -1,11 +1,33 @@
-from openai import AsyncOpenAI
+"""Script name: openai_adapter.py. Call model services with direct LAN routing."""
+
+from ipaddress import ip_address
+from urllib.parse import urlsplit
+
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
 from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger("agent")
 
 
+def _is_local_endpoint(base_url: str) -> bool:
+    """Identify localhost and private IP endpoints without resolving public domains.
+
+    :param base_url: Model service URL.
+    :return: Whether environment proxies should be bypassed.
+    """
+    host = (urlsplit(base_url).hostname or "").rstrip(".").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback or address.is_link_local
+
+
 class OpenAIAdapter:
+    """Wrap OpenAI-compatible calls, bypassing proxies for local endpoints."""
 
     def __init__(self, api_key: str, base_url: str, model: str):
         """
@@ -19,6 +41,8 @@ class OpenAIAdapter:
         self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
+            # Keep SDK transport defaults; bypass environment proxies only for LAN URLs.
+            http_client=DefaultAsyncHttpxClient(trust_env=False) if _is_local_endpoint(base_url) else None,
         )
         self.model = model
 

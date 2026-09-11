@@ -3,13 +3,14 @@ Smoke test one registered operator with a random linear algebra task.
 
 The script builds a random integer matrix/vector case, computes the expected
 matrix-vector product locally, asks the agent to use the operator, and verifies
-the operator method executed with the same result in an session.
+the operator method executed with the same result in a session.
 """
 import asyncio
 import os
 import random
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -28,7 +29,7 @@ from dynamic_agent_client.service_handler import ServiceHandler
 load_dotenv()
 
 
-SESSION_ID = "smoke-one-operator"
+SESSION_ID = "smoke-one-operator-" + uuid4().hex[:8]
 
 
 class LinearAlgebraOperator(AgentOperator):

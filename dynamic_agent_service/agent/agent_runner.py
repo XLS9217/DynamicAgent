@@ -65,6 +65,7 @@ class AgentRunner:
         await self.invoke()
 
     async def invoke(self) -> None:
+        """Invoke the model and finalize runner state before announcing completion."""
         if self.state is not AgentState.RUNNING:
             raise RuntimeError(f"Agent is {self.state}")
 
@@ -78,6 +79,9 @@ class AgentRunner:
             self._full_assistant_text += invoke_response.full_text
 
         finished = not invoke_response.tool_calls
+        if finished:
+            # Keep the completed text available to the session's persistence callback.
+            self._complete_run()
         await self._emit_chunk(AgentResponseChunk(
             type="agent_chunk",
             text=(
@@ -96,11 +100,6 @@ class AgentRunner:
             self._running_message_list.append(self._build_assistant_tool_call_message(invoke_response))
             self._start_tool_result_gather(invoke_response.tool_calls)
             await self._send_tool_calls(invoke_response.tool_calls)
-            return
-
-        if invoke_response.full_text:
-            self._running_message_list.append({"role": "assistant", "content": invoke_response.full_text})
-        self._complete_run()
 
     async def _handle_response_chunk(self, chunk: AgentResponseChunk) -> None:
         """Forward model stream chunks with runner metadata."""
@@ -164,10 +163,10 @@ class AgentRunner:
         self.pending_tool_results = {}
 
     def _complete_run(self) -> None:
+        """Clear execution state while retaining completed text until the next trigger."""
         self._clear_tool_state()
         self._running_message_list = []
         self._tools = []
-        self._full_assistant_text = ""
         self.state = AgentState.IDLE
 
     @staticmethod

@@ -39,12 +39,10 @@ class RealtimeSession:
         setting: str,
         reconnect_keep: int = 30,
         session_id: str = None,
-        persist: bool = False,
     ):
         self.session_id = session_id or str(uuid.uuid4())
         self.setting = setting
         self.reconnect_keep = reconnect_keep
-        self.persist = persist
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
@@ -69,19 +67,18 @@ class RealtimeSession:
         self,
         role: str,
         content: str,
-        durable: bool | None = None,
-    ) -> str | None:
+    ) -> str:
+        """Store a message in both backends and return its UUID."""
         return await SessionAccessor.append_message(
             self.session_id,
             role,
             content,
-            durable=self.persist if durable is None else durable,
         )
 
     async def load_messages(self) -> list[dict]:
+        """Load cached history, restoring it from PostgreSQL when needed."""
         messages = await SessionAccessor.load_messages(
             self.session_id,
-            durable=self.persist,
         )
         return [m.model_dump() for m in messages]
 
@@ -157,9 +154,7 @@ class RealtimeSession:
             # Fetch history before this turn's message
             history = await self.load_messages()
             # A durable UUID message_id names the corresponding trigger-log file.
-            trigger_id = await self.append_message("user", text, durable=True)
-            if trigger_id is None:
-                raise RuntimeError("Failed to persist user trigger")
+            trigger_id = await self.append_message("user", text)
             LogInterface.start_trigger(self.session_id, trigger_id)
 
             # Trigger agent with history; AGI owns the in-progress invoke state.
@@ -281,7 +276,6 @@ class RealtimeSessionManager:
             setting=request.setting,
             reconnect_keep=request.reconnect_keep,
             session_id=request.session_id,
-            persist=request.persist,
         )
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()

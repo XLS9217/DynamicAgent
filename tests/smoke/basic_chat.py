@@ -1,4 +1,4 @@
-"""Smoke test two conversational turns in a non-persistent session."""
+"""Smoke test two conversational turns in a session."""
 import asyncio
 import os
 import sys

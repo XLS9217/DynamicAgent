@@ -15,17 +15,15 @@ class SessionCleanupTest(unittest.IsolatedAsyncioTestCase):
         RealtimeSessionManager._sessions = self.original_sessions
 
     async def test_cleanup_removes_expired_sessions_and_redis_messages(self):
-        expired_ephemeral = RealtimeSession(
+        expired_first = RealtimeSession(
             "test",
             reconnect_keep=1,
-            session_id="expired-ephemeral",
-            persist=False,
+            session_id="expired-first",
         )
-        expired_durable = RealtimeSession(
+        expired_second = RealtimeSession(
             "test",
             reconnect_keep=1,
-            session_id="expired-durable",
-            persist=True,
+            session_id="expired-second",
         )
         active = RealtimeSession(
             "test",
@@ -34,12 +32,12 @@ class SessionCleanupTest(unittest.IsolatedAsyncioTestCase):
         )
 
         expired_at = time.time() - 2
-        expired_ephemeral.disconnect_time = expired_at
-        expired_durable.disconnect_time = expired_at
+        expired_first.disconnect_time = expired_at
+        expired_second.disconnect_time = expired_at
         active.disconnect_time = None
         RealtimeSessionManager._sessions = {
-            expired_ephemeral.session_id: expired_ephemeral,
-            expired_durable.session_id: expired_durable,
+            expired_first.session_id: expired_first,
+            expired_second.session_id: expired_second,
             active.session_id: active,
         }
 
@@ -50,12 +48,12 @@ class SessionCleanupTest(unittest.IsolatedAsyncioTestCase):
         ) as delete_cached_messages:
             await RealtimeSessionManager.cleanup_expired()
 
-        self.assertIsNone(RealtimeSessionManager.get(expired_ephemeral.session_id))
-        self.assertIsNone(RealtimeSessionManager.get(expired_durable.session_id))
+        self.assertIsNone(RealtimeSessionManager.get(expired_first.session_id))
+        self.assertIsNone(RealtimeSessionManager.get(expired_second.session_id))
         self.assertIs(RealtimeSessionManager.get(active.session_id), active)
         self.assertCountEqual(
             [call.args[0] for call in delete_cached_messages.await_args_list],
-            [expired_ephemeral.session_id, expired_durable.session_id],
+            [expired_first.session_id, expired_second.session_id],
         )
 
     async def test_cleanup_preserves_session_during_reconnect_window(self):

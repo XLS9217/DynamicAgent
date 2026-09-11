@@ -9,7 +9,6 @@ class CreateSessionRequest(BaseModel):
     setting: str
     reconnect_keep: int = 30
     session_id: Optional[str] = None  # provided to resume an existing session
-    persist: bool = False
 
 
 class ToolResultRequest(BaseModel):

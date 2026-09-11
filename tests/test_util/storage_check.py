@@ -14,7 +14,6 @@ __all__ = [
     "SessionStorageSnapshot",
     "assert_session_deleted",
     "assert_session_persisted",
-    "assert_session_redis_only",
     "get_postgres_session_messages",
     "get_redis_session_messages",
     "get_session_storage",
@@ -84,7 +83,7 @@ async def get_postgres_session_messages(session_id: str) -> list[MessageItem]:
             SELECT role, content
             FROM session_message
             WHERE session_id = $1
-            ORDER BY seq
+            ORDER BY create_at
             """,
             session_id,
         )
@@ -157,27 +156,6 @@ async def assert_session_persisted(
         expected = _expected_message_dicts(expected_messages)
         assert postgres == expected, (
             f"session {session_id!r} messages differ: expected={expected!r}, actual={postgres!r}"
-        )
-    return snapshot
-
-
-async def assert_session_redis_only(
-    session_id: str,
-    expected_messages: Sequence[MessageItem | Mapping[str, str]] | None = None,
-) -> SessionStorageSnapshot:
-    """Assert that a session exists in Redis and has no PostgreSQL messages."""
-    snapshot = await get_session_storage(session_id)
-    postgres = _message_dicts(snapshot.postgres_messages)
-    redis = _message_dicts(snapshot.redis_messages)
-
-    assert not postgres, (
-        f"session {session_id!r} unexpectedly has PostgreSQL messages: {postgres!r}"
-    )
-    assert redis, f"session {session_id!r} has no Redis messages"
-    if expected_messages is not None:
-        expected = _expected_message_dicts(expected_messages)
-        assert redis == expected, (
-            f"session {session_id!r} Redis messages differ: expected={expected!r}, actual={redis!r}"
         )
     return snapshot
 

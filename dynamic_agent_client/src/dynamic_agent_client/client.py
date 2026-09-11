@@ -54,9 +54,8 @@ class DynamicAgentClient:
         setting: str,
         reconnect_keep: int = 30,
         session_id: str = None,
-        persist: bool = False,
     ) -> "DynamicAgentClient":
-        """Create a Redis-backed session. Set persist=True for PostgreSQL persistence."""
+        """Create a session with PostgreSQL history and a Redis message cache."""
         instance = cls()
         (
             instance.session_id,
@@ -68,7 +67,6 @@ class DynamicAgentClient:
             instance,
             reconnect_keep=reconnect_keep,
             session_id=session_id,
-            persist=persist,
         )
         instance._listen_task = asyncio.ensure_future(instance._listen())
         return instance

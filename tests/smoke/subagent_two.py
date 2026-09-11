@@ -266,7 +266,6 @@ async def main():
                 "the relevant IDs from the first subagent report into the second subagent task."
             ),
             session_id=f"smoke-subagent-two-{uuid4().hex[:8]}",
-            persist=False,
         )
         def on_event(event: AgentEvent) -> None:
             if isinstance(event, AgentInvocationEvent):

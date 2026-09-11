@@ -3,7 +3,7 @@ Smoke test one registered operator with a random linear algebra task.
 
 The script builds a random integer matrix/vector case, computes the expected
 matrix-vector product locally, asks the agent to use the operator, and verifies
-the operator method executed with the same result in an ephemeral session.
+the operator method executed with the same result in an session.
 """
 import asyncio
 import os
@@ -88,7 +88,6 @@ async def main():
                 "Do not calculate matrix operations mentally."
             ),
             session_id=SESSION_ID,
-            persist=False,
         )
         assert client.session_id == SESSION_ID
         assert client.messages == [], "fresh smoke session should start empty"

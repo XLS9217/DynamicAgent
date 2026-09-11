@@ -2,7 +2,7 @@
 Smoke test two registered operators with separate weather and body-temperature tools.
 
 The script creates random city/weather and Celsius-temperature cases, asks the
-agent to use both operators in one ephemeral session, and verifies both methods.
+agent to use both operators in one session, and verifies both methods.
 """
 import asyncio
 import os
@@ -144,7 +144,6 @@ async def main():
                 "body-temperature tasks. Do not invent weather or temperature calculations."
             ),
             session_id=SESSION_ID,
-            persist=False,
         )
         assert client.session_id == SESSION_ID
         assert client.messages == [], "fresh smoke session should start empty"

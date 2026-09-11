@@ -1,11 +1,6 @@
-"""
-Session accessor for session message persistence.
+"""Session messages are written to PostgreSQL and cached in Redis.
 
-Postgres is the durable source of truth; Redis is shared live session state.
-- durable append: write to Postgres and Redis
-- ephemeral append: write only to Redis
-- durable load: read Redis first, then fall back to Postgres
-- ephemeral load: read only from Redis
+Reads use Redis first and restore the cache from PostgreSQL on a cache miss.
 """
 import uuid
 
@@ -25,39 +20,32 @@ class SessionAccessor:
         session_id: str,
         role: str,
         content: str,
-        durable: bool = True,
-    ) -> str | None:
-        """Append one message to Redis and, when durable, PostgreSQL."""
+    ) -> str:
+        """Append one message to PostgreSQL and Redis."""
         item = MessageItem(role=role, content=content)
 
-        if durable:
-            message_id = str(uuid.uuid4())
-            pool = PgInstance.get_pool()
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO session_message (message_id, session_id, role, content)
-                    VALUES ($1, $2, $3, $4)
-                    """,
-                    message_id, session_id, role, content,
-                )
-        else:
-            message_id = None
+        message_id = str(uuid.uuid4())
+        pool = PgInstance.get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO session_message (message_id, session_id, role, content)
+                VALUES ($1, $2, $3, $4)
+                """,
+                message_id, session_id, role, content,
+            )
 
         redis = RedisInstance.get_client()
         await redis.rpush(_messages_key(session_id), item.model_dump_json())
         return message_id
 
     @staticmethod
-    async def load_messages(session_id: str, durable: bool = True) -> list[MessageItem]:
-        """Load Redis messages, falling back to PostgreSQL only when durable."""
+    async def load_messages(session_id: str) -> list[MessageItem]:
+        """Load Redis messages, falling back to PostgreSQL on a cache miss."""
         redis = RedisInstance.get_client()
         raw_list = await redis.lrange(_messages_key(session_id), 0, -1)
         if raw_list:
             return [MessageItem.model_validate_json(raw) for raw in raw_list]
-
-        if not durable:
-            return []
 
         # Cache miss: load from Postgres and repopulate Redis
         pool = PgInstance.get_pool()

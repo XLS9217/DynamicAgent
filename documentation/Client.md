@@ -79,7 +79,6 @@ await DynamicAgentClient.connect("http://localhost:7777")
 
 client = await DynamicAgentClient.create(
     setting="You are a concise research assistant.",
-    persist=False,
 )
 ```
 

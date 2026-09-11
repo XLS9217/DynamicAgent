@@ -6,7 +6,6 @@ from .client_struct import (
     ToolExecutionEvent,
 )
 from .operator.agent_operator_base import AgentOperator, agent_tool, description, flow
-from .operator.rag_operator import RagOperator
 from .operator.subagent_operator import InitSubagentRequest, SubagentOperator, TriggerSubagentRequest
 
 __all__ = [
@@ -16,7 +15,6 @@ __all__ = [
     "AgentResponseChunk",
     "ToolExecutionEvent",
     "AgentOperator",
-    "RagOperator",
     "SubagentOperator",
     "InitSubagentRequest",
     "TriggerSubagentRequest",

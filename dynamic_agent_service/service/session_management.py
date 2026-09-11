@@ -10,11 +10,9 @@ from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInte
 from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
 from dynamic_agent_service.external_service.openai_resource_accessor import OpenAIResourceAccessor
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
-from dynamic_agent_service.service.service_structs import CreateSessionRequest, RagCache
+from dynamic_agent_service.service.service_structs import CreateSessionRequest
 from dynamic_agent_service.logging.log_interface import LogInterface
 from dynamic_agent_service.service.session_accessor import SessionAccessor
-from dynamic_agent_service.service.monitor_events import MonitorEventHub, session_event_payload
-from dynamic_agent_service.external_service.redis_instance import RedisInstance
 
 def _sanitize_json(raw: str) -> str:
     """Fix common LLM JSON quirks like leading zeros (e.g. 00.5 -> 0.5)."""
@@ -65,10 +63,7 @@ class RealtimeSession:
             return AgentState.RUNNING
         return self.agi.state
 
-    # ===== Redis-backed session state (keys owned here, not in RedisInstance) =====
-
-    def _rag_key(self) -> str:
-        return f"session:{self.session_id}:rag"
+    # ===== Session message persistence =====
 
     async def append_message(
         self,
@@ -89,15 +84,6 @@ class RealtimeSession:
             durable=self.persist,
         )
         return [m.model_dump() for m in messages]
-
-    async def set_rag(self, rag: RagCache) -> None:
-        client = RedisInstance.get_client()
-        await client.set(self._rag_key(), rag.model_dump_json())
-
-    async def get_rag(self) -> RagCache | None:
-        client = RedisInstance.get_client()
-        raw = await client.get(self._rag_key())
-        return RagCache.model_validate_json(raw) if raw else None
 
     async def agent_setup(self):
         resource = await OpenAIResourceAccessor.get_active_resource()
@@ -123,7 +109,6 @@ class RealtimeSession:
 
         self.client = client
         self.disconnect_time = None
-        MonitorEventHub.publish_nowait("session_join", session_event_payload(self))
 
         async def stream_callback(chunk: AgentResponseChunk):
             if (
@@ -159,7 +144,7 @@ class RealtimeSession:
         except Exception:
             pass
 
-    async def trigger_agent(self, text: str, bucket_name: str = None):
+    async def trigger_agent(self, text: str):
         """Trigger agent with text input. Response streams via WebSocket."""
         if self.client is None:
             raise RuntimeError("WebSocket not connected")
@@ -300,7 +285,6 @@ class RealtimeSessionManager:
         )
         cls._sessions[session.session_id] = session
         cls._ensure_cleanup_task()
-        MonitorEventHub.publish_nowait("session_created", session_event_payload(session))
         return session
 
     @classmethod
@@ -311,7 +295,6 @@ class RealtimeSessionManager:
     def mark_disconnected(cls, session: RealtimeSession):
         """Mark session as disconnected, starts reconnect_keep countdown."""
         session.disconnect_time = time.time()
-        MonitorEventHub.publish_nowait("session_leave", session_event_payload(session))
 
     @classmethod
     async def cleanup_expired(cls):
@@ -325,7 +308,6 @@ class RealtimeSessionManager:
                 except Exception:
                     pass
                 LogInterface.release_session(sid)
-                MonitorEventHub.publish_nowait("session_expired", session_event_payload(session))
 
     @classmethod
     def _ensure_cleanup_task(cls):

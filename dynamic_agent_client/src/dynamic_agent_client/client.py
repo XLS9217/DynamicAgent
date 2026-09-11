@@ -241,7 +241,6 @@ class DynamicAgentClient:
         text: str,
         on_chunk: Callable[[AgentResponseChunk], None] = None,
         on_event: Callable[[AgentEvent], None] = None,
-        bucket_name: str = None,
     ):
         await self._ensure_connected()
 
@@ -254,7 +253,7 @@ class DynamicAgentClient:
             operator.reset_tool_counters()
 
         # Fire HTTP trigger, response streams via WebSocket
-        await ServiceHandler.trigger(self.session_id, text, bucket_name=bucket_name)
+        await ServiceHandler.trigger(self.session_id, text)
         # Wait for streaming response to complete
         await self._response_done.wait()
         result = self._accumulated_text
@@ -272,21 +271,6 @@ class DynamicAgentClient:
     async def delete_session(cls, session_id: str) -> bool:
         """Delete persisted chat messages for a session."""
         return await ServiceHandler.delete_session(session_id)
-
-    @classmethod
-    async def create_bucket(cls, name: str, description: str = ""):
-        """Create a new bucket for storing knowledge."""
-        return await ServiceHandler.create_bucket(name, description)
-
-    @classmethod
-    async def check_bucket(cls, name: str):
-        """Check if a bucket exists."""
-        return await ServiceHandler.check_bucket(name)
-
-    @classmethod
-    async def delete_bucket(cls, name: str):
-        """Delete a bucket and all its contents."""
-        return await ServiceHandler.delete_bucket(name)
 
     async def _ensure_connected(self):
         """Ensure websocket is connected, reconnect if needed."""

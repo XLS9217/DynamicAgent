@@ -114,11 +114,11 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
-    async def trigger(cls, session_id: str, text: str, bucket_name: str = None):
+    async def trigger(cls, session_id: str, text: str):
         """Trigger agent with text input via HTTP POST."""
         resp = await cls._http.post(
             f"{cls._server_addr}/trigger",
-            json={"session_id": session_id, "text": text, "bucket_name": bucket_name},
+            json={"session_id": session_id, "text": text},
         )
         resp.raise_for_status()
         return resp.json()
@@ -221,66 +221,6 @@ class ServiceHandler:
         data = resp.json()
         cls._clients.pop(session_id, None)
         return data.get("status") == "ok"
-
-    @classmethod
-    async def create_bucket(cls, name: str, description: str = ""):
-        """Create a new bucket via HTTP POST."""
-        resp = await cls._http.post(
-            f"{cls._server_addr}/knowledge/bucket",
-            json={
-                "name": name,
-                "description": description,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    @classmethod
-    async def check_bucket(cls, name: str):
-        """Check if a bucket exists via HTTP GET."""
-        resp = await cls._http.get(
-            f"{cls._server_addr}/knowledge/bucket/{name}",
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    @classmethod
-    async def delete_bucket(cls, name: str):
-        """Delete a bucket via HTTP DELETE."""
-        resp = await cls._http.delete(
-            f"{cls._server_addr}/knowledge/bucket/{name}",
-        )
-        resp.raise_for_status()
-        return resp.json()
-
-    @classmethod
-    async def retrieve(cls, query: str, bucket_name: str, top_k: int = 10):
-        """Retrieve knowledge from a bucket via HTTP POST. Returns (results, analytics)."""
-        resp = await cls._http.post(
-            f"{cls._server_addr}/knowledge/retrieve",
-            json={
-                "query": query,
-                "bucket_name": bucket_name,
-                "top_k": top_k,
-            },
-            timeout=120.0,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("results", data), data.get("analytics", {})
-
-    @classmethod
-    async def expand_node_ids(cls, bucket_name: str, node_ids: list[str]):
-        """Expand knowledge node IDs via HTTP POST."""
-        resp = await cls._http.post(
-            f"{cls._server_addr}/knowledge/expand",
-            json={
-                "bucket_name": bucket_name,
-                "node_ids": node_ids,
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()
 
     @classmethod
     async def reconnect_session(cls, session_id: str):

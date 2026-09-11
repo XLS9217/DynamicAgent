@@ -16,37 +16,6 @@ from dynamic_agent_service.external_service.pg_instance import PgInstance
 
 
 SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS bucket (
-    name        TEXT PRIMARY KEY,
-    description TEXT NOT NULL DEFAULT ''
-);
-
-CREATE TABLE IF NOT EXISTS blueprint (
-    blueprint_id TEXT PRIMARY KEY,
-    bucket_name  TEXT NOT NULL REFERENCES bucket(name),
-    name         TEXT NOT NULL,
-    description  TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS blueprint_attribute (
-    attribute_id  TEXT PRIMARY KEY,
-    blueprint_id  TEXT NOT NULL REFERENCES blueprint(blueprint_id),
-    name          TEXT NOT NULL,
-    description   TEXT NOT NULL,
-    is_identifier BOOLEAN NOT NULL DEFAULT FALSE
-);
-
-CREATE TABLE IF NOT EXISTS blueprint_instance (
-    instance_id  TEXT PRIMARY KEY,
-    blueprint_id TEXT NOT NULL REFERENCES blueprint(blueprint_id)
-);
-
-CREATE TABLE IF NOT EXISTS instance_source (
-    source_id       TEXT PRIMARY KEY,
-    instance_id     TEXT NOT NULL REFERENCES blueprint_instance(instance_id) ON DELETE CASCADE,
-    source_metadata JSONB NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS session_message (
     message_id UUID PRIMARY KEY,
     create_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),

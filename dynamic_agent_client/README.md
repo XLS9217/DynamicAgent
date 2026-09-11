@@ -148,43 +148,6 @@ method is not called. Counters reset at the start of the next `client.trigger(..
 Tool execution is observed through `on_event` using the same subscription as
 model invocations.
 
-### RAG operator
-
-RAG is also an operator now. Register it on the client when a session should use a
-knowledge bucket:
-
-```python
-from dynamic_agent_client import RagOperator
-
-await client.add_operator(RagOperator(bucket_name="my_bucket"))
-answer = await client.trigger("Answer using the knowledge bucket.")
-```
-
-`RagOperator.retrieve` has a per-trigger `count_limit` of 2. The agent must call
-the RAG tool itself; passing `bucket_name=` to `client.trigger(...)` no longer
-injects retrieved knowledge into the agent message list.
-
-To customize RAG results, subclass `RagOperator`. If you override a tool method,
-decorate the override with `@agent_tool`; an undecorated override replaces the
-parent method and will not be registered as a tool.
-
-```python
-from dynamic_agent_client import RagOperator, agent_tool
-
-
-class CustomRagOperator(RagOperator):
-    @agent_tool(
-        description="Retrieve relevant knowledge for the user's query from the configured bucket.",
-        count_limit=2,
-    )
-    async def retrieve(self, query: str):
-        result = await super().retrieve(query)
-        return {
-            "client_note": "Prefer directly relevant records.",
-            "results": result,
-        }
-```
-
 ## Pushing changes to the client repo
 
 The client is developed here in the monorepo under `dynamic_agent_client/`, but

@@ -20,7 +20,9 @@ class KnowledgeEngine:
     @classmethod
     async def get_embeddings(cls, text_list: list[str]) -> list[list[float]]:
         if cls._base_url is None:
-            cls.initialize()
+            cls._base_url = os.getenv("KNOWLEDGE_ENGINE_URL")
+        if not cls._base_url:
+            raise RuntimeError("KNOWLEDGE_ENGINE_URL is not configured")
         async with httpx.AsyncClient(mounts={"http://": None}) as client:
             resp = await client.post(
                 f"{cls._base_url}/embeddings",

@@ -1,6 +1,8 @@
 import os
 from typing import Optional, List, Dict, Any
-from pymilvus import MilvusClient, AnnSearchRequest, WeightedRanker
+from pymilvus import (
+    MilvusClient, AnnSearchRequest, WeightedRanker, DataType, Function, FunctionType,
+)
 from dynamic_agent_service.logging.setup_logging import get_my_logger
 
 logger = get_my_logger("storage")
@@ -35,14 +37,17 @@ class MilvusInstance:
         top_k: int = 10,
         output_fields: Optional[List[str]] = None,
         filter_expr: Optional[str] = None,
+        vector_field: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         client = cls.get_client()
+        search_options = {"anns_field": vector_field} if vector_field else {}
         results = client.search(
             collection_name=collection_name,
             data=[query_vector],
             limit=top_k,
             output_fields=output_fields,
-            filter=filter_expr,
+            filter=filter_expr or "",
+            **search_options,
         )
         flat = results[0] if results else []
         logger.info(f"Retrieved {len(flat)} results from collection '{collection_name}'")
@@ -62,7 +67,8 @@ class MilvusInstance:
         """
         Hybrid search combining dense vector (ANN) and sparse retrieval (BM25).
 
-        Uses native Milvus hybrid_search with RRFRanker for result fusion.
+        Uses WeightedRanker with the schema from create_hybrid_collection().
+        Returned IDs use kn_id for compatibility with existing vector callers.
         """
         client = cls.get_client()
         output_fields = output_fields or []
@@ -95,8 +101,8 @@ class MilvusInstance:
 
         # Flatten results structure
         flat_results = []
-        for hit in results[0]:
-            item = {'kn_id': hit.id, 'distance': hit.distance}
+        for hit in results[0] if results else []:
+            item = {'kn_id': hit['id'], 'distance': hit['distance']}
             entity = hit.get('entity', {})
             for field in output_fields:
                 if field in entity:
@@ -141,6 +147,40 @@ class MilvusInstance:
             dimension=dimension,
         )
         logger.info(f"Created collection '{collection_name}' with dimension {dimension}")
+        return collection_name
+
+    @classmethod
+    def create_hybrid_collection(cls, collection_name: str, dimension: int) -> str:
+        """Create a standalone text/vector collection with dense and BM25 indexes.
+
+        Upsert kn_id (string), value (text), and embedding (float vector).
+        Milvus generates sparse_vector. No relational metadata is required.
+        Existing collections are left unchanged and must have a compatible schema.
+        """
+        if dimension <= 0:
+            raise ValueError("dimension must be positive")
+        client = cls.get_client()
+        if client.has_collection(collection_name):
+            return collection_name
+
+        schema = client.create_schema(auto_id=False, enable_dynamic_field=False)
+        schema.add_field("kn_id", DataType.VARCHAR, is_primary=True, max_length=64)
+        schema.add_field("value", DataType.VARCHAR, max_length=65535, enable_analyzer=True)
+        schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=dimension)
+        schema.add_function(Function(
+            name="bm25",
+            function_type=FunctionType.BM25,
+            input_field_names=["value"],
+            output_field_names=["sparse_vector"],
+        ))
+        indexes = client.prepare_index_params()
+        indexes.add_index("embedding", index_type="AUTOINDEX", metric_type="COSINE")
+        indexes.add_index("sparse_vector", index_type="SPARSE_INVERTED_INDEX", metric_type="BM25")
+        client.create_collection(
+            collection_name=collection_name, schema=schema, index_params=indexes,
+        )
+        client.load_collection(collection_name)
         return collection_name
 
     @classmethod

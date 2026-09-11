@@ -13,7 +13,6 @@ my_logger_setup()
 
 from dynamic_agent_service.service.service_router import router as session_router
 from dynamic_agent_service.service.sdk_router import router as sdk_router
-from dynamic_agent_service.service.monitor_router import router as monitor_router
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.milvus_instance import MilvusInstance
 from dynamic_agent_service.external_service.knowledge_engine import KnowledgeEngine
@@ -40,6 +39,7 @@ async def lifespan(app: FastAPI):
     logger.info("Closing external services...")
     await PgInstance.close()
     await RedisInstance.close()
+    MilvusInstance.close()
     logger.info("Services closed")
 
 app = FastAPI(lifespan=lifespan)
@@ -53,7 +53,6 @@ app.add_middleware(
 )
 
 app.include_router(session_router)
-app.include_router(monitor_router)
 app.include_router(sdk_router)
 
 @app.exception_handler(Exception)

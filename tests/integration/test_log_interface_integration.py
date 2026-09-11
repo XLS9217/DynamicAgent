@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import uuid
@@ -102,14 +103,10 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        result = await CacheLogAccessor.read_log_file(
-            f"trigger_log/{message_id}.jsonl"
-        )
-        self.assertEqual(result["format"], "jsonl")
-        self.assertFalse(result["truncated"])
-        self.assertEqual(len(result["entries"]), 1)
-
-        record = result["entries"][0]
+        log_file = Path(self.temp_dir.name) / "trigger_log" / f"{message_id}.jsonl"
+        records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(records), 1)
+        record = records[0]
         self.assertEqual(record["invoke_id"], invoke_id)
         self.assertEqual(record["trigger_id"], str(message_row["message_id"]))
         self.assertEqual(record["resource_id"], str(resource_row["resource_id"]))
@@ -119,20 +116,6 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["completion_tokens"], 3)
         self.assertEqual(record["usage_detail"]["total_tokens"], 11)
         self.assertIsNone(record["error"])
-
-    async def test_large_log_file_is_read_in_full(self):
-        log_dir = Path(self.temp_dir.name) / "trigger_log"
-        log_dir.mkdir()
-        payload = "x" * (2 * 1024 * 1024 + 1)
-        (log_dir / "large.jsonl").write_text(
-            '{"payload":"' + payload + '"}\n',
-            encoding="utf-8",
-        )
-
-        result = await CacheLogAccessor.read_log_file("trigger_log/large.jsonl")
-
-        self.assertFalse(result["truncated"])
-        self.assertEqual(result["entries"][0]["payload"], payload)
 
 
 if __name__ == "__main__":

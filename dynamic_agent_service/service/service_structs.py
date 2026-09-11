@@ -67,14 +67,12 @@ class TriggerSubagentRequest(BaseModel):
 # Keys:
 #   session:{session_id}:meta      -> SessionMeta (JSON)
 #   session:{session_id}:messages  -> Redis list of MessageItem (JSON)
-#   session:{session_id}:rag       -> RagCache (JSON)
 
 class SessionMeta(BaseModel):
     """Core session metadata. Stored at session:{session_id}:meta."""
     session_id: str
     setting: str
     reconnect_keep: int
-    bucket_name: Optional[str] = None
     created_at: float  # Unix timestamp
     disconnect_time: Optional[float] = None  # set when WebSocket disconnects
 
@@ -83,10 +81,3 @@ class MessageItem(BaseModel):
     """One conversation message. Each element of session:{session_id}:messages."""
     role: str  # "system" | "user" | "assistant"
     content: str
-
-
-class RagCache(BaseModel):
-    """Last RAG-retrieved knowledge. Stored at session:{session_id}:rag."""
-    query: str
-    knowledge: list[dict]  # reconstructed instances (heterogeneous attribute dicts)
-    retrieved_at: float  # Unix timestamp

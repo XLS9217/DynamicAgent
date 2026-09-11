@@ -65,7 +65,7 @@ class OpenAIResourceAccessorTest(unittest.IsolatedAsyncioTestCase):
             await initialize_storage()
 
         schema = "\n".join(call.args[0] for call in connection.execute.await_args_list)
-        self.assertIn("CREATE TABLE IF NOT EXISTS bucket", schema)
+        self.assertEqual(schema.count("CREATE TABLE IF NOT EXISTS"), 2)
         self.assertIn("CREATE TABLE IF NOT EXISTS session_message", schema)
         self.assertIn("CREATE TABLE IF NOT EXISTS openai_resource", schema)
         transaction.__aenter__.assert_awaited_once()

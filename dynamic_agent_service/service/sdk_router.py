@@ -1,10 +1,11 @@
 import hashlib
 import os
+from html import escape
 from importlib.metadata import metadata, version
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 
 router = APIRouter(prefix="/sdk", tags=["sdk"])
@@ -65,10 +66,38 @@ async def sdk_manifest() -> dict:
     }
 
 
+@router.get("/simple/", response_class=HTMLResponse)
+async def sdk_index() -> HTMLResponse:
+    """List packages distributed by this backend."""
+    return HTMLResponse(
+        '<!DOCTYPE html><html><body><a href="dynamic-agent-client/">'
+        'dynamic-agent-client</a></body></html>',
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@router.get("/simple/dynamic-agent-client/", response_class=HTMLResponse)
+async def python_package_index() -> HTMLResponse:
+    """Expose the bundled client wheel through a standard Python package index."""
+    wheel = _client_wheel()
+    requires_python = escape(metadata(CLIENT_PACKAGE).get("Requires-Python", ">=3.11"), quote=True)
+    filename = escape(wheel.name, quote=True)
+    return HTMLResponse(
+        '<!DOCTYPE html><html><body>'
+        f'<a href="../../python/{filename}#sha256={_sha256(wheel)}" '
+        f'data-requires-python="{requires_python}">{filename}</a>'
+        '</body></html>',
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/python", include_in_schema=False)
 async def latest_python_sdk() -> RedirectResponse:
     wheel = _client_wheel()
-    return RedirectResponse(url=f"/sdk/python/{wheel.name}", status_code=307)
+    return RedirectResponse(
+        url=f"/sdk/python/{wheel.name}", status_code=307,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/python/{filename}")

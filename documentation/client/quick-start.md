@@ -1,6 +1,31 @@
-# Client Usage
+# Client Quick Start
 
-The client supports two basic cases: chat and chat with tools. Start the service with an enabled model resource configured, then connect to its URL. Each example below is a complete script.
+The client supports two basic cases: chat and chat with tools. Connect to the backend URL provided by your service administrator. Each example below is a complete script.
+
+## Install
+
+Requires Python 3.11 or newer. Add the client to your project from the backend's package index:
+
+```sh
+uv add --index "http://localhost:7777/sdk/simple" dynamic-agent-client
+```
+
+Replace `http://localhost:7777` with your backend address. The index offers the client version bundled with that backend. The package name is `dynamic-agent-client`; import it as `dynamic_agent_client`.
+
+Your project's lockfile keeps the installed version fixed. After the backend publishes a newer client, upgrade explicitly:
+
+```sh
+uv lock --upgrade-package dynamic-agent-client --refresh-package dynamic-agent-client
+uv sync
+```
+
+`/sdk/python` is a browser download redirect, not a `uv add` package URL. Use `/sdk/simple` for installation and upgrades.
+
+Use your backend URL in `DynamicAgentClient.connect()` below. Save an example as `chat.py` and run it:
+
+```sh
+uv run python chat.py
+```
 
 ## Chat
 

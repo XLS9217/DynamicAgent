@@ -35,7 +35,7 @@ class ServiceSurfaceTest(unittest.TestCase):
         paths = app.openapi()["paths"]
         self.assertIn("/trigger", paths)
         self.assertIn("/create_session", paths)
-        self.assertEqual(set(TriggerRequest.model_fields), {"session_id", "text"})
+        self.assertEqual(set(TriggerRequest.model_fields), {"session_id", "text", "trigger_id"})
         with TestClient(app) as client:
             for path in ["/knowledge/bucket/test", "/buckets", "/blueprints/test/instances", "/session/test/rag"]:
                 self.assertEqual(client.get(path).status_code, 404)

@@ -43,6 +43,7 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
             await PgInstance.close()
 
     async def test_database_trigger_and_resource_are_written_to_trigger_log(self):
+        trigger_id = str(uuid.uuid4())
         message_id = str(uuid.uuid4())
         session_id = str(uuid.uuid4())
         resource_id = str(uuid.uuid4())
@@ -84,7 +85,7 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(resource_row)
 
         LogInterface.configure_resource(session_id, str(resource_row["resource_id"]))
-        LogInterface.start_trigger(session_id, str(message_row["message_id"]))
+        LogInterface.start_trigger(session_id, trigger_id, message_id=str(message_row["message_id"]))
         invoke_id = await LogInterface.append_invoke_log(
             session_id=session_id,
             runner_id="integration-runner",
@@ -103,12 +104,13 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-        log_file = Path(self.temp_dir.name) / "trigger_log" / f"{message_id}.jsonl"
+        log_file = Path(self.temp_dir.name) / "trigger_log" / f"{trigger_id}.jsonl"
         records = [json.loads(line) for line in log_file.read_text(encoding="utf-8").splitlines()]
         self.assertEqual(len(records), 1)
         record = records[0]
         self.assertEqual(record["invoke_id"], invoke_id)
-        self.assertEqual(record["trigger_id"], str(message_row["message_id"]))
+        self.assertEqual(record["trigger_id"], trigger_id)
+        self.assertEqual(record["message_id"], str(message_row["message_id"]))
         self.assertEqual(record["resource_id"], str(resource_row["resource_id"]))
         self.assertEqual(record["runner_id"], "integration-runner")
         self.assertEqual(record["text"], "integration response")

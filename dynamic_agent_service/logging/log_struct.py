@@ -1,8 +1,16 @@
 """Canonical structure for one flat file-based invocation log record."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+class TriggerCancelledLog(BaseModel):
+    """Record an interrupted turn, including stops while waiting for tools."""
+    type: Literal["trigger_cancelled"] = "trigger_cancelled"
+    trigger_id: str
+    message_id: str | None = None
+    text: str
 
 
 class InvokeLog(BaseModel):
@@ -10,6 +18,7 @@ class InvokeLog(BaseModel):
 
     invoke_id: str
     trigger_id: str | None = None
+    message_id: str | None = None
     runner_id: str
     parent_runner_id: str | None = None
     text: str | None = None

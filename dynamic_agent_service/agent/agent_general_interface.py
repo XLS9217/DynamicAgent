@@ -78,6 +78,20 @@ class AgentGeneralInterface:
         self._stream_callback = callback
         self._runner.stream_callback = callback
 
+    def set_trigger(self, trigger_id: str) -> None:
+        """Associate the main runner with the accepted session turn."""
+        self._runner.trigger_id = trigger_id
+        self._runner._full_assistant_text = ""
+
+    def execution_tasks(self) -> set[asyncio.Task]:
+        """Collect model and tool-continuation tasks across all runners."""
+        return {task for runner in self._runner_by_id.values() for task in runner.execution_tasks()}
+
+    def reset_after_stop(self) -> None:
+        """Make all runners reusable after session cancellation."""
+        for runner in self._runner_by_id.values():
+            runner.reset_after_stop()
+
     def pending_tool_calls_by_runner(self) -> list[tuple[str, list[AgentToolCall]]]:
         return [
             (runner.runner_id, list(runner.pending_tool_calls.values()))
@@ -208,6 +222,7 @@ class AgentGeneralInterface:
                 completed.set()
 
         runner.stream_callback = stream_callback
+        runner.trigger_id = self._runner.trigger_id
         runner.parent_tool_call_id = parent_tool_call_id
 
         try:

@@ -47,7 +47,7 @@ class LinearAlgebraOperator(AgentOperator):
         return "Use matrix_vector_product when asked to multiply a matrix by a vector."
 
     @agent_tool(description="Multiply a matrix by a vector")
-    def matrix_vector_product(self, matrix: list[list[int]], vector: list[int]) -> list[int]:
+    async def matrix_vector_product(self, matrix: list[list[int]], vector: list[int]) -> list[int]:
         """
         :param matrix: The integer matrix, represented as a list of rows
         :param vector: The integer vector

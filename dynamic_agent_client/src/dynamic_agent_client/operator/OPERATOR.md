@@ -14,7 +14,7 @@ class MyOperator(AgentOperator):
 
 ```python
 @agent_tool(description="Search for information")
-def search(self, query: str, limit: int = 10):
+async def search(self, query: str, limit: int = 10):
     '''
     :param query: The search query string
     :param limit: Maximum number of results to return
@@ -80,7 +80,7 @@ agent.add_operator(operator)
 The agent will then have access to:
 - `operator.get_description()` — system prompt description
 - `operator.get_flow()` — flow instructions
-- All `@agent_tool` methods as callable tools
+- All async `@agent_tool` methods as callable tools
 
 ## 6. The agent will automatically discover and use your tools.
 
@@ -89,3 +89,4 @@ The agent will then have access to:
 - Document parameters with `:param name: description` in docstrings
 - Tools can be sync or async functions
 - Only methods (with `self`) can be decorated with `@agent_tool`, `@description`, or `@flow`
+- Tools must use `async def` and nonblocking I/O. Description and flow providers stay synchronous.

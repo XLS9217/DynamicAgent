@@ -1,17 +1,18 @@
 """Central flat-file logging boundary for LLM provider invocations."""
 
-from dataclasses import dataclass
+from pydantic import BaseModel
 from typing import Any
 import uuid
 
 from dynamic_agent_service.logging.cache_log_accessor import CacheLogAccessor
-from dynamic_agent_service.logging.log_struct import InvokeLog
+from dynamic_agent_service.logging.log_struct import InvokeLog, TriggerCancelledLog
 
 
-@dataclass
-class _LogContext:
+class _LogContext(BaseModel):
+    """Associate one execution with its resource and persisted user message."""
     resource_id: str | None = None
     trigger_id: str | None = None
+    message_id: str | None = None
 
 
 class LogInterface:
@@ -24,14 +25,27 @@ class LogInterface:
         cls._contexts.setdefault(session_id, _LogContext()).resource_id = resource_id
 
     @classmethod
-    def start_trigger(cls, session_id: str, trigger_id: str) -> None:
-        cls._contexts.setdefault(session_id, _LogContext()).trigger_id = trigger_id
+    def start_trigger(cls, session_id: str, trigger_id: str, message_id: str | None = None) -> None:
+        """Associate the execution ID with an optional persisted user message."""
+        context = cls._contexts.setdefault(session_id, _LogContext())
+        context.trigger_id = trigger_id
+        context.message_id = message_id
 
     @classmethod
     def complete_trigger(cls, session_id: str) -> None:
         context = cls._contexts.get(session_id)
         if context is not None:
             context.trigger_id = None
+            context.message_id = None
+
+    @classmethod
+    async def cancel_trigger(cls, session_id: str, trigger_id: str, text: str) -> None:
+        """Record cancellation under the same execution ID as streamed events."""
+        context = cls._contexts.get(session_id)
+        if context is not None and context.trigger_id == trigger_id:
+            await CacheLogAccessor.append_record(TriggerCancelledLog(
+                trigger_id=trigger_id, message_id=context.message_id, text=text,
+            ))
 
     @classmethod
     def release_session(cls, session_id: str) -> None:
@@ -63,6 +77,7 @@ class LogInterface:
         record = InvokeLog(
             invoke_id=invoke_id,
             trigger_id=context.trigger_id,
+            message_id=context.message_id,
             runner_id=runner_id,
             parent_runner_id=parent_runner_id,
             text=text,

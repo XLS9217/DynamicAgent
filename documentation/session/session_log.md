@@ -10,12 +10,12 @@ Conversation messages and model invocation logs are stored separately and linked
 
 ## Writes and Associations
 
-1. When the user triggers a turn, the user message is written to PostgreSQL and Redis.
-2. Its `message_id` becomes the turn's `trigger_id` and determines the log filename. Multiple model calls in the same turn append to the same file.
-3. Each invocation record contains invocation and trigger IDs, runner and parent-runner IDs, response text, tool calls and results, model resource ID, token usage, and error information.
+1. The SDK generates a `trigger_id` for each `client.trigger()` call. HTTP requests, streamed events, tool results, cancellation, and log filenames share this execution ID. The backend generates it when omitted by a direct HTTP caller.
+2. The user message is written to PostgreSQL and Redis. Its separate `message_id` is recorded in the log context; it does not replace `trigger_id`. Multiple model calls in the same trigger append to the same file.
+3. Each invocation record contains invocation, trigger, and message IDs, runner and parent-runner IDs, response text, tool calls and results, model resource ID, token usage, and error information.
 4. The final assistant message is written to PostgreSQL and Redis.
 
-Association: `session_id -> session_message.message_id -> trigger_log/{message_id}.jsonl`. Without a trigger context, the filename uses the current `invoke_id` instead.
+Association: `trigger_log/{trigger_id}.jsonl -> record.message_id -> session_message.message_id -> session_id`. Without a trigger context, the filename uses the current `invoke_id` instead.
 
 The invocation record itself contains no `session_id`, timestamp, or complete input conversation. Query the PostgreSQL message record to identify the session and trigger time.
 
@@ -25,7 +25,7 @@ A **trigger** is one user-triggered turn. An **invoke** is one model service cal
 
 ```text
 trigger_log/
-  {user_message_id}.jsonl
+  {trigger_id}.jsonl
     Line 1: Model call A returns a tool-call request
     Line 2: Model call B reads the tool result and returns an answer
 ```
@@ -37,7 +37,8 @@ The format is JSONL: **one complete JSON object per line, with no enclosing arra
 | Field | Type | Description |
 | --- | --- | --- |
 | `invoke_id` | `str` | UUID generated independently for each invocation record |
-| `trigger_id` | `str / null` | User message ID for this turn; normally also the log filename |
+| `trigger_id` | `str / null` | Execution ID shared with HTTP and WebSocket messages; normally also the log filename |
+| `message_id` | `str / null` | Persisted user message ID linking this execution to PostgreSQL history |
 | `runner_id` | `str` | Runner that initiated the call |
 | `parent_runner_id` | `str / null` | Parent runner ID; normally `null` for the main runner |
 | `text` | `str / null` | Complete text returned by this model call; not necessarily the final answer for the turn |
@@ -59,9 +60,19 @@ Tool execution does not generate a separate invocation record. Typically, call A
 These two lines belong to the same `trigger-1.jsonl` file. IDs are shortened for readability; actual `invoke_id` values and normal `trigger_id` values are UUIDs.
 
 ```jsonl
-{"invoke_id":"invoke-a","trigger_id":"trigger-1","runner_id":"main-1","parent_runner_id":null,"text":null,"tool_id":"call-1","tool_use":{"items":[{"id":"call-1","name":"get_weather","arguments":"{\"city\":\"Shanghai\"}","session_id":null,"runner_id":null}]},"tool_result":null,"resource_id":"resource-1","prompt_tokens":100,"completion_tokens":20,"usage_detail":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120},"error":null}
-{"invoke_id":"invoke-b","trigger_id":"trigger-1","runner_id":"main-1","parent_runner_id":null,"text":"It is sunny in Shanghai today.","tool_id":null,"tool_use":null,"tool_result":{"items":[{"role":"tool","tool_call_id":"call-1","content":"Sunny"}]},"resource_id":"resource-1","prompt_tokens":130,"completion_tokens":10,"usage_detail":{"prompt_tokens":130,"completion_tokens":10,"total_tokens":140},"error":null}
+{"invoke_id":"invoke-a","trigger_id":"trigger-1","message_id":"message-1","runner_id":"main-1","parent_runner_id":null,"text":null,"tool_id":"call-1","tool_use":{"items":[{"id":"call-1","name":"get_weather","arguments":"{\"city\":\"Shanghai\"}","session_id":null,"runner_id":null}]},"tool_result":null,"resource_id":"resource-1","prompt_tokens":100,"completion_tokens":20,"usage_detail":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120},"error":null}
+{"invoke_id":"invoke-b","trigger_id":"trigger-1","message_id":"message-1","runner_id":"main-1","parent_runner_id":null,"text":"It is sunny in Shanghai today.","tool_id":null,"tool_use":null,"tool_result":{"items":[{"role":"tool","tool_call_id":"call-1","content":"Sunny"}]},"resource_id":"resource-1","prompt_tokens":130,"completion_tokens":10,"usage_detail":{"prompt_tokens":130,"completion_tokens":10,"total_tokens":140},"error":null}
 ```
+
+## Cancelled Turns
+
+Stopping a turn saves its partial assistant text to PostgreSQL and Redis before the agent becomes ready again. If no text was produced, no assistant message is added. The turn's JSONL file also receives a cancellation record, including when the agent was waiting for a tool:
+
+```json
+{"type":"trigger_cancelled","trigger_id":"trigger-1","message_id":"message-1","text":"Partial response"}
+```
+
+The same `trigger_id` identifies the execution everywhere. `message_id` identifies the persisted user message. If stop happens before that message is stored, the cancellation record has `message_id=null`. A cancelled in-flight model call may also have an invocation record with `error.type="CancelledError"`.
 
 ## Reading and Cleanup
 
@@ -69,3 +80,5 @@ These two lines belong to the same `trigger-1.jsonl` file. IDs are shortened for
 - Read JSONL logs directly from the filesystem. The former monitoring endpoints and log-browsing/clearing helpers have been removed; log writing remains.
 - Session expiration deletes the Redis message cache but retains PostgreSQL messages and log files.
 - Explicit session deletion removes PostgreSQL and Redis messages but leaves JSONL files. Deleting those message records also removes the database link between the logs and their session.
+
+Existing log files are unchanged. Older records used the user message ID as `trigger_id` and may lack the separate `message_id` field.

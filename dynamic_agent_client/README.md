@@ -136,7 +136,7 @@ answer = await client.trigger(
 )
 ```
 
-`@agent_tool` builds the function schema from the method signature and docstring.
+`@agent_tool` requires an `async def` method and builds the function schema from its signature and docstring. Use nonblocking I/O so streaming and cancellation remain responsive.
 Use `count_limit=N` to limit a tool to `N` executions per trigger. When the limit
 is exceeded, the tool returns a clear limit-reached message and the underlying
 method is not called. Counters reset at the start of the next `client.trigger(...)`.

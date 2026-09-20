@@ -1,7 +1,8 @@
 import asyncio
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
 from dynamic_agent_service.agent.agent_structs import AgentState
@@ -41,6 +42,8 @@ async def tool_result(body: ToolResultRequest):
     session = RealtimeSessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    if not session.accepts_trigger(body.trigger_id):
+        return {"status": "ignored"}
     try:
         await session.receive_tool_result(
             tool_call_id=body.tool_call_id,
@@ -58,6 +61,8 @@ async def init_subagent(body: InitSubagentRequest):
     session = RealtimeSessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    if not session.accepts_trigger(body.trigger_id):
+        raise HTTPException(status_code=409, detail="Turn is no longer active")
     try:
         runner_id = session.init_subagent(
             parent_runner_id=body.parent_runner_id,
@@ -75,6 +80,8 @@ async def trigger_subagent(body: TriggerSubagentRequest):
     session = RealtimeSessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    if not session.accepts_trigger(body.trigger_id):
+        return {"status": "ignored"}
     try:
         await session.trigger_subagent(
             parent_runner_id=body.parent_runner_id,
@@ -129,6 +136,27 @@ async def register_operator(body: RegisterOperatorRequest):
 class TriggerRequest(BaseModel):
     session_id: str
     text: str
+    trigger_id: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,128}$")
+
+
+class StopRequest(BaseModel):
+    """Identify the session turn to cancel without closing its connection."""
+    session_id: str
+    trigger_id: str | None = None
+
+
+@router.post("/stop")
+async def stop(body: StopRequest):
+    """Stop the requested turn; repeated or outdated requests do nothing."""
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    completion = await session.stop(body.trigger_id)
+    return {
+        "status": ("stopped" if completion.cancelled else "completed") if completion else "idle",
+        "trigger_id": completion.trigger_id if completion else body.trigger_id,
+        "completion": completion.model_dump(exclude_none=True) if completion else None,
+    }
 
 @router.post("/trigger")
 async def trigger(body: TriggerRequest):
@@ -140,8 +168,9 @@ async def trigger(body: TriggerRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     if session.state is not AgentState.IDLE:
         raise HTTPException(status_code=409, detail=f"Session is {session.state}")
-    session.active_trigger_task = asyncio.create_task(session.trigger_agent(body.text))
-    return {"status": "accepted"}
+    trigger_id = body.trigger_id or uuid4().hex
+    session.start_trigger(body.text, trigger_id)
+    return {"status": "accepted", "trigger_id": trigger_id}
 
 
 @router.delete("/session/{session_id}")

@@ -118,6 +118,7 @@ class SubagentOperator(AgentOperator):
             name=request.name,
             setting=request.setting,
             operators=self.serialize_selected_operators(request.operator_list),
+            trigger_id=self.trigger_id,
         )
         runner_id = response.get("runner_id")
         if response.get("status") != "ok" or not runner_id:
@@ -150,6 +151,7 @@ class SubagentOperator(AgentOperator):
             parent_tool_call_id=parent_tool_call_id,
             runner_id=request.runner_id,
             task=request.task,
+            trigger_id=self.trigger_id,
         )
         if response.get("status") != "accepted":
             raise RuntimeError(f"Subagent dispatch was not accepted: {response}")

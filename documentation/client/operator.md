@@ -48,7 +48,9 @@ async def main():
 asyncio.run(main())
 ```
 
-Tools may be synchronous or asynchronous. If your operator defines `__init__`, call `super().__init__()` to collect its decorated methods. Register operators again when recreating a client session. See [Quick Start](quick-start.md) for installation.
+Tools must use `async def` and nonblocking I/O; synchronous tools are rejected by `@agent_tool`. If your operator defines `__init__`, call `super().__init__()` to collect its decorated methods. Register operators again when recreating a client session. See [Quick Start](quick-start.md) for installation.
+
+`client.stop()` cancels tool tasks. Use awaitable operations so cancellation can interrupt waits. Tool cancellation does not roll back external actions.
 
 ## Official Operator: `SubagentOperator`
 

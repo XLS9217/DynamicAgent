@@ -190,7 +190,7 @@ class StatOperator(AgentOperator):
         return "Calculate engagement statistics and identify aggressive comments in the mock posts."
 
     @agent_tool(description="Return the post with the highest likes-to-views ratio")
-    def highest_like_view_ratio(self) -> dict:
+    async def highest_like_view_ratio(self) -> dict:
         post = max(self.posts, key=lambda item: item["likes"] / item["views"])
         result = {
             "post_id": post["id"],
@@ -202,7 +202,7 @@ class StatOperator(AgentOperator):
         return result
 
     @agent_tool(description="Return the deliberately aggressive comment in the mock posts")
-    def most_aggressive_comment(self) -> dict:
+    async def most_aggressive_comment(self) -> dict:
         for post in self.posts:
             for comment in post["comments"]:
                 if "idiot" in comment["text"].lower() or "garbage" in comment["text"].lower():

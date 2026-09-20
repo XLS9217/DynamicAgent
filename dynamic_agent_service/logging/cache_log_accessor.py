@@ -7,7 +7,7 @@ from typing import ClassVar
 
 import aiofiles
 
-from dynamic_agent_service.logging.log_struct import InvokeLog
+from dynamic_agent_service.logging.log_struct import InvokeLog, TriggerCancelledLog
 
 
 class CacheLogAccessor:
@@ -24,6 +24,12 @@ class CacheLogAccessor:
 
     @classmethod
     async def append_invoke_log(cls, log: InvokeLog) -> None:
+        """Append a completed model invocation."""
+        await cls.append_record(log)
+
+    @classmethod
+    async def append_record(cls, log: InvokeLog | TriggerCancelledLog) -> None:
+        """Append one invocation or cancellation record to its trigger file."""
         file_id = log.trigger_id or log.invoke_id
         log_dir = cls.cache_log_root / "trigger_log"
         log_dir.mkdir(parents=True, exist_ok=True)

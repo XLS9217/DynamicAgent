@@ -36,7 +36,7 @@ Shared services, associated by session_id
 | `subagent_tasks`      | `set[asyncio.Task]`              | Empty set                            | Subagent trigger tasks, automatically removed from the set when they finish                                                       |
 | `state`               | `AgentState`, read-only property | Initially`IDLE`                    | Usually the main runner's state; returns`RUNNING` when the main trigger task is still active but the runner is temporarily idle |
 
-`resource_id` and `trigger_id` are stored in `LogInterface._contexts[session_id]`, not directly on the Session. The Session also does not directly maintain a complete message-history list.
+The Session stores the current execution `trigger_id`. `LogInterface._contexts[session_id]` also stores it alongside `resource_id` and the separate persisted user `message_id`. The Session also does not directly maintain a complete message-history list.
 
 ## Runner Structure and State
 
@@ -54,7 +54,7 @@ The typical flow is `IDLE -> RUNNING -> GATHERING -> RUNNING -> IDLE`. Without t
 
 1. **Create:** `POST /create_session` accepts `setting`, `reconnect_keep`, and `session_id`. The manager registers the in-memory object. Setup selects the highest-priority enabled, non-deleted model resource, creates the AGI, and configures the logging resource context. The response includes the session ID, main runner ID, WebSocket URL, and available message history.
 2. **Connect:** `/agent_session?session_id=...` attaches the WebSocket, registers the streaming callback, and resends outstanding tool calls. Tool definitions are registered through `POST /agent_operator`.
-3. **Trigger:** `POST /trigger` accepts a request only while the session is idle. It loads prior history, then writes the current user message. That message's ID becomes `trigger_id`. AGI builds model input from the system prompt, history, and current user input.
+3. **Trigger:** `POST /trigger` accepts a request only while the session is idle. It reserves the SDK-provided `trigger_id` (or generates one), loads prior history, then writes the current user message under a separate `message_id`. All execution messages and logs share `trigger_id`. AGI builds model input from the system prompt, history, and current user input.
 4. **Tools and subagents:** Tool requests travel to the client over WebSocket. The client returns results through `POST /tool_result`, and `runner_id` routes them to the correct runner. `/init_subagent` and `/trigger_subagent` manage subagents, which share their Session's communication and logging association.
 5. **Complete:** When the main runner finishes, its accumulated assistant text is saved and the current trigger logging context is cleared. Individual model invocation records have already been appended to the turn's JSONL file.
 6. **Disconnect and expire:** Disconnect records a timestamp. The session becomes eligible for expiration after `reconnect_keep` seconds. Every 10 seconds, the manager removes expired in-memory objects, deletes Redis message caches, and releases logging contexts. Persisted messages and log files remain.
@@ -73,4 +73,4 @@ The typical flow is `IDLE -> RUNNING -> GATHERING -> RUNNING -> IDLE`. Without t
 - `SessionMeta` defines a metadata model, but there is currently no implementation writing `session:{session_id}:meta`, and no PostgreSQL session master table.
 - Explicit session deletion closes the current connection, removes the in-memory entry, and deletes PostgreSQL/Redis messages. It does not delete JSONL files. Neither deletion nor expiration currently explicitly cancels all running tasks.
 
-Sources: [session_management.py](../../dynamic_agent_service/service/session_management.py), [service_router.py](../../dynamic_agent_service/service/service_router.py), [agent_general_interface.py](../../dynamic_agent_service/agent/agent_general_interface.py), and [agent_runner.py](../../dynamic_agent_service/agent/agent_runner.py). For log structure, see [session_log.md](../storage/session_log.md).
+Sources: [session_management.py](../../dynamic_agent_service/service/session_management.py), [service_router.py](../../dynamic_agent_service/service/service_router.py), [agent_general_interface.py](../../dynamic_agent_service/agent/agent_general_interface.py), and [agent_runner.py](../../dynamic_agent_service/agent/agent_runner.py). For log structure, see [session_log.md](session_log.md).

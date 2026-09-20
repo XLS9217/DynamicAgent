@@ -47,13 +47,13 @@ class CityWeatherOperator(AgentOperator):
         return "Call available_cities before requesting a report, then call weather_report for a selected city."
 
     @agent_tool(description="List cities with available weather reports")
-    def available_cities(self) -> list[str]:
+    async def available_cities(self) -> list[str]:
         result = sorted(self.reports.keys())
         self.probe_calls.append({"tool": "available_cities", "result": result})
         return result
 
     @agent_tool(description="Return a weather report for a city")
-    def weather_report(self, city: str) -> dict:
+    async def weather_report(self, city: str) -> dict:
         """
         :param city: The city name to fetch weather for
         """
@@ -77,7 +77,7 @@ class BodyTemperatureOperator(AgentOperator):
         return "Use classify_temperature when a body temperature reading is provided."
 
     @agent_tool(description="Convert Celsius body temperature to Fahrenheit and classify fever level")
-    def classify_temperature(self, celsius: float) -> dict:
+    async def classify_temperature(self, celsius: float) -> dict:
         """
         :param celsius: Body temperature in degrees Celsius
         """

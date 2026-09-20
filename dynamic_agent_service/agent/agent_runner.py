@@ -40,6 +40,9 @@ class AgentRunner:
         self._running_message_list: list[dict] = []
         self._tools: list[dict] = []
         self._full_assistant_text = ""
+        self.trigger_id: str | None = None
+        self._invoke_task: asyncio.Task | None = None
+        self._continuation_task: asyncio.Task | None = None
 
     @property
     def accumulated_assistant_text(self) -> str:
@@ -65,18 +68,29 @@ class AgentRunner:
         await self.invoke()
 
     async def invoke(self) -> None:
+        """Track the active invocation so stop can cancel every continuation."""
+        task = asyncio.current_task()
+        self._invoke_task = task
+        try:
+            await self._invoke()
+        finally:
+            if self._invoke_task is task:
+                self._invoke_task = None
+
+    async def _invoke(self) -> None:
         """Invoke the model and finalize runner state before announcing completion."""
         if self.state is not AgentState.RUNNING:
             raise RuntimeError(f"Agent is {self.state}")
 
+        previous_text = self._full_assistant_text
         invoke_response = await self._response_handler.invoke(
             messages=self._running_message_list,
             tools=self._tools,
             stream_callback=self._handle_response_chunk,
         )
 
-        if invoke_response.full_text:
-            self._full_assistant_text += invoke_response.full_text
+        # Reconcile final text without duplicating the chunks already collected.
+        self._full_assistant_text = previous_text + (invoke_response.full_text or "")
 
         finished = not invoke_response.tool_calls
         if finished:
@@ -103,12 +117,15 @@ class AgentRunner:
 
     async def _handle_response_chunk(self, chunk: AgentResponseChunk) -> None:
         """Forward model stream chunks with runner metadata."""
+        if chunk.text and not chunk.finished:
+            self._full_assistant_text += chunk.text
         await self._emit_chunk(chunk)
 
     async def _emit_chunk(self, chunk: AgentResponseChunk) -> None:
         if self._stream_callback is None:
             return
         await self._stream_callback(chunk.model_copy(update={
+            "trigger_id": self.trigger_id,
             "runner_id": self.runner_id,
             "runner_name": self.name,
             "parent_runner_id": (
@@ -131,7 +148,18 @@ class AgentRunner:
         self.pending_tool_results[tool_call_id] = content
 
         if self._all_tool_results_received():
-            asyncio.create_task(self._complete_tool_results_and_invoke())
+            if self._continuation_task is None or self._continuation_task.done():
+                self._continuation_task = asyncio.create_task(self._complete_tool_results_and_invoke())
+
+    def execution_tasks(self) -> set[asyncio.Task]:
+        """Return owned tasks that must finish cancellation before runner reuse."""
+        return {task for task in (self._invoke_task, self._continuation_task) if task and not task.done()}
+
+    def reset_after_stop(self) -> None:
+        """Release execution state once owned tasks have been cancelled."""
+        self._complete_run()
+        self._invoke_task = None
+        self._continuation_task = None
 
     def _start_tool_result_gather(self, tool_calls: list[AgentToolCall]) -> None:
         self.state = AgentState.GATHERING

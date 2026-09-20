@@ -1,7 +1,4 @@
-"""
-Singleton that owns the shared webhook server and the connection to the service.
-All clients go through ServiceHandler — one webhook port for all sessions.
-"""
+"""Script name: service_handler.py. Share backend HTTP access and register session clients."""
 import asyncio
 import json
 import re
@@ -21,8 +18,8 @@ def _sanitize_json(raw: str) -> str:
 
 
 def _make_operator_tool_callable(operator, tool_name: str):
-    def call_tool(**arguments):
-        return operator.execute(tool_name, arguments)
+    async def call_tool(**arguments):
+        return await operator.execute(tool_name, arguments)
 
     call_tool.operator = operator
 
@@ -30,13 +27,7 @@ def _make_operator_tool_callable(operator, tool_name: str):
 
 
 class ServiceHandler:
-    """
-    Class-only singleton.
-    1. Runs one webhook server shared across all sessions
-    2. Maps session_id -> client for routing tool execution
-    3. Handles connect (create_session + websocket) on behalf of client
-    4. Handles add_operator on behalf of client
-    """
+    """Share the HTTP client, open session WebSockets, and register operator bindings."""
 
     _server_addr: str = None
     _clients: dict = {}  # session_id -> DynamicAgentClient
@@ -44,10 +35,7 @@ class ServiceHandler:
 
     @classmethod
     async def connect(cls, server_addr: str):
-        """
-        First-time setup: start webhook server and store the service address.
-        Subsequent calls with same address are a no-op.
-        """
+        """Set the backend address and create the shared HTTP client if needed."""
         cls._server_addr = server_addr.rstrip("/")
         if cls._http is None:
             cls._http = _make_httpx_client()
@@ -112,14 +100,25 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
-    async def trigger(cls, session_id: str, text: str):
+    async def trigger(cls, session_id: str, text: str, trigger_id: str | None = None):
         """Trigger agent with text input via HTTP POST."""
         resp = await cls._http.post(
             f"{cls._server_addr}/trigger",
-            json={"session_id": session_id, "text": text},
+            json={"session_id": session_id, "text": text, "trigger_id": trigger_id},
         )
         resp.raise_for_status()
         return resp.json()
+
+    @classmethod
+    async def stop_trigger(cls, session_id: str, trigger_id: str) -> dict:
+        """Wait for backend cancellation and session readiness."""
+        response = await cls._http.post(
+            f"{cls._server_addr}/stop",
+            json={"session_id": session_id, "trigger_id": trigger_id},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return response.json()
 
     @classmethod
     def register_runner_operators(
@@ -149,6 +148,7 @@ class ServiceHandler:
         ok: bool,
         result,
         runner_id: str | None = None,
+        trigger_id: str | None = None,
     ):
         """Send a locally executed tool result back to the service."""
         serialized_result = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
@@ -160,6 +160,7 @@ class ServiceHandler:
                 "tool_call_id": tool_call_id,
                 "ok": ok,
                 "result": serialized_result,
+                "trigger_id": trigger_id,
             },
         )
         resp.raise_for_status()
@@ -173,6 +174,7 @@ class ServiceHandler:
         name: str,
         setting: str,
         operators: list[dict],
+        trigger_id: str | None = None,
     ) -> dict:
         resp = await cls._http.post(
             f"{cls._server_addr}/init_subagent",
@@ -182,6 +184,7 @@ class ServiceHandler:
                 "name": name,
                 "setting": setting,
                 "operators": operators,
+                "trigger_id": trigger_id,
             },
         )
         resp.raise_for_status()
@@ -195,6 +198,7 @@ class ServiceHandler:
         parent_tool_call_id: str,
         runner_id: str,
         task: str,
+        trigger_id: str | None = None,
     ) -> dict:
         resp = await cls._http.post(
             f"{cls._server_addr}/trigger_subagent",
@@ -204,6 +208,7 @@ class ServiceHandler:
                 "parent_tool_call_id": parent_tool_call_id,
                 "runner_id": runner_id,
                 "task": task,
+                "trigger_id": trigger_id,
             },
         )
         resp.raise_for_status()

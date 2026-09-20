@@ -72,8 +72,9 @@ class OpenAIAdapter:
 
         completion = await self.async_client.chat.completions.create(**kwargs)
 
-        async for chunk in completion:
-            yield chunk
+        async with completion:
+            async for chunk in completion:
+                yield chunk
 
     async def async_get_response(
             self,

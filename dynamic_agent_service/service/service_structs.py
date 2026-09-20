@@ -13,6 +13,7 @@ class CreateSessionRequest(BaseModel):
 
 class ToolResultRequest(BaseModel):
     session_id: str
+    trigger_id: str | None = None
     runner_id: Optional[str] = None
     tool_call_id: str
     ok: bool = True
@@ -21,6 +22,7 @@ class ToolResultRequest(BaseModel):
 
 class InitSubagentRequest(BaseModel):
     session_id: str
+    trigger_id: str | None = None
     parent_runner_id: str
     name: str
     setting: str
@@ -42,6 +44,7 @@ class InitSubagentRequest(BaseModel):
 
 class TriggerSubagentRequest(BaseModel):
     session_id: str
+    trigger_id: str | None = None
     parent_runner_id: str
     parent_tool_call_id: str
     runner_id: str

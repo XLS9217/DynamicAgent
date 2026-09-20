@@ -37,9 +37,11 @@ class LogInterfaceTest(unittest.IsolatedAsyncioTestCase):
             self.session_message["session_id"],
             self.resource.resource_id,
         )
+        self.trigger_id = str(uuid.uuid4())
         LogInterface.start_trigger(
             self.session_message["session_id"],
-            self.session_message["message_id"],
+            self.trigger_id,
+            message_id=self.session_message["message_id"],
         )
 
     async def asyncTearDown(self):
@@ -52,7 +54,7 @@ class LogInterfaceTest(unittest.IsolatedAsyncioTestCase):
         return (
             Path(self.temp_dir.name)
             / "trigger_log"
-            / f"{self.session_message['message_id']}.jsonl"
+            / f"{self.trigger_id}.jsonl"
         )
 
     async def test_append_invoke_log_writes_canonical_flat_structure(self):
@@ -87,6 +89,7 @@ class LogInterfaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(record), {
             "invoke_id",
             "trigger_id",
+            "message_id",
             "runner_id",
             "parent_runner_id",
             "text",
@@ -100,7 +103,8 @@ class LogInterfaceTest(unittest.IsolatedAsyncioTestCase):
             "error",
         })
         self.assertEqual(record["invoke_id"], invoke_id)
-        self.assertEqual(record["trigger_id"], self.session_message["message_id"])
+        self.assertEqual(record["trigger_id"], self.trigger_id)
+        self.assertEqual(record["message_id"], self.session_message["message_id"])
         self.assertEqual(record["resource_id"], self.resource.resource_id)
         self.assertEqual(record["text"], "partial response")
         self.assertEqual(record["tool_id"], "call-1")
@@ -139,7 +143,7 @@ class LogInterfaceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(records), append_count)
         self.assertEqual(len(set(invoke_ids)), append_count)
         self.assertEqual({record["invoke_id"] for record in records}, set(invoke_ids))
-        self.assertTrue(all(record["trigger_id"] == self.session_message["message_id"] for record in records))
+        self.assertTrue(all(record["trigger_id"] == self.trigger_id for record in records))
         self.assertLess(elapsed_seconds, 5.0)
         print(f"LogInterface appended {append_count} records in {elapsed_seconds:.4f}s")
 
@@ -180,6 +184,25 @@ class LogInterfaceTest(unittest.IsolatedAsyncioTestCase):
 
         path = Path(self.temp_dir.name) / "trigger_log" / f"{arbitrary_trigger_id}.jsonl"
         self.assertTrue(path.is_file())
+
+    async def test_cancellation_keeps_execution_and_message_ids_separate(self):
+        """Cancellation uses the same filename and identities as model records."""
+        await LogInterface.cancel_trigger(self.session_message["session_id"], self.trigger_id, "partial")
+        record = json.loads(self.trigger_log_path().read_text(encoding="utf-8"))
+        self.assertEqual(record["type"], "trigger_cancelled")
+        self.assertEqual(record["trigger_id"], self.trigger_id)
+        self.assertEqual(record["message_id"], self.session_message["message_id"])
+        self.assertNotEqual(record["trigger_id"], record["message_id"])
+
+    async def test_cancellation_before_persistence_has_no_message_id(self):
+        """An accepted execution can be logged before its message is written."""
+        trigger_id = uuid.uuid4().hex
+        LogInterface.start_trigger(self.session_message["session_id"], trigger_id)
+        await LogInterface.cancel_trigger(self.session_message["session_id"], trigger_id, "")
+        path = Path(self.temp_dir.name) / "trigger_log" / f"{trigger_id}.jsonl"
+        record = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIsNone(record["message_id"])
+        self.assertEqual(record["trigger_id"], trigger_id)
 
 
 if __name__ == "__main__":

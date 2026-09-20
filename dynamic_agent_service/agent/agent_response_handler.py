@@ -1,3 +1,4 @@
+from contextlib import aclosing
 from typing import Callable
 
 from openai import APIError
@@ -114,52 +115,53 @@ class AgentResponseHandler:
         completion_tokens = 0
         total_tokens = 0
 
-        async for chunk in self.openai_adapter.async_stream_response(
+        async with aclosing(self.openai_adapter.async_stream_response(
             messages,
             tools=tools,
             parallel_tool_calls=self.parallel_tool_calls,
-        ):
-            usage = getattr(chunk, "usage", None)
-            if usage is not None:
-                prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-                completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-                total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
-                if stream_callback:
-                    await stream_callback(AgentResponseChunk(
-                        type="agent_chunk",
-                        text="",
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        total_tokens=total_tokens,
-                    ))
-
-            if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
-                delta = chunk.choices[0].delta
-
-                if hasattr(delta, 'content') and delta.content:
-                    full_response += delta.content
+        )) as stream:
+            async for chunk in stream:
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+                    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+                    total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
                     if stream_callback:
-                        await stream_callback(AgentResponseChunk(type="agent_chunk", text=delta.content))
+                        await stream_callback(AgentResponseChunk(
+                            type="agent_chunk",
+                            text="",
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=total_tokens,
+                        ))
 
-                if hasattr(delta, 'tool_calls') and delta.tool_calls:
-                    for tool_call_chunk in delta.tool_calls:
-                        idx = tool_call_chunk.index
-                        if idx not in tool_calls_dict:
-                            tool_calls_dict[idx] = {
-                                "id": "",
-                                "name": "",
-                                "arguments": ""
-                            }
+                if hasattr(chunk, 'choices') and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
 
-                        if hasattr(tool_call_chunk, 'id') and tool_call_chunk.id:
-                            tool_calls_dict[idx]["id"] = tool_call_chunk.id
+                    if hasattr(delta, 'content') and delta.content:
+                        full_response += delta.content
+                        if stream_callback:
+                            await stream_callback(AgentResponseChunk(type="agent_chunk", text=delta.content))
 
-                        if hasattr(tool_call_chunk, 'function'):
-                            func = tool_call_chunk.function
-                            if hasattr(func, 'name') and func.name:
-                                tool_calls_dict[idx]["name"] = func.name
-                            if hasattr(func, 'arguments') and func.arguments:
-                                tool_calls_dict[idx]["arguments"] += func.arguments
+                    if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                        for tool_call_chunk in delta.tool_calls:
+                            idx = tool_call_chunk.index
+                            if idx not in tool_calls_dict:
+                                tool_calls_dict[idx] = {
+                                    "id": "",
+                                    "name": "",
+                                    "arguments": ""
+                                }
+
+                            if hasattr(tool_call_chunk, 'id') and tool_call_chunk.id:
+                                tool_calls_dict[idx]["id"] = tool_call_chunk.id
+
+                            if hasattr(tool_call_chunk, 'function'):
+                                func = tool_call_chunk.function
+                                if hasattr(func, 'name') and func.name:
+                                    tool_calls_dict[idx]["name"] = func.name
+                                if hasattr(func, 'arguments') and func.arguments:
+                                    tool_calls_dict[idx]["arguments"] += func.arguments
 
         tool_calls = [
             AgentToolCall(

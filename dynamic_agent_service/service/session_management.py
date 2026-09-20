@@ -48,9 +48,16 @@ class RealtimeSession:
         self.agi: AgentGeneralInterface | None = None
         self.active_trigger_task: asyncio.Task | None = None
         self.subagent_tasks: set[asyncio.Task] = set()
+        self.trigger_id: str | None = None
+        self._trigger_open = False
+        self._terminal_chunk: AgentResponseChunk | None = None
+        self._stopping = False
+        self._completion_lock = asyncio.Lock()
 
     @property
     def state(self) -> AgentState:
+        if self._stopping:
+            return AgentState.RUNNING
         if self.agi is None:
             return AgentState.IDLE
         if (
@@ -109,25 +116,83 @@ class RealtimeSession:
 
         async def stream_callback(chunk: AgentResponseChunk):
             """Persist completed turns and release ownership before sending completion."""
+            if self._stopping or (chunk.trigger_id is not None and chunk.trigger_id != self.trigger_id):
+                return
             if (
                 chunk.finished
                 and self.agi is not None
                 and chunk.runner_id == self.agi.runner_id
             ):
-                # Tool continuations also need to stay busy while their text is saved.
-                completion_task = asyncio.current_task()
-                self.active_trigger_task = completion_task
-                assistant_text = self.agi.accumulated_assistant_text
-                if assistant_text:
-                    await self.append_message("assistant", assistant_text)
-                LogInterface.complete_trigger(self.session_id)
-                if self.active_trigger_task is completion_task:
-                    self.active_trigger_task = None
+                async with self._completion_lock:
+                    completion_task = asyncio.current_task()
+                    self.active_trigger_task = completion_task
+                    assistant_text = self.agi.accumulated_assistant_text
+                    if assistant_text:
+                        await self.append_message("assistant", assistant_text)
+                    self._finish_turn(chunk.model_copy(update={"text": assistant_text}))
             await self.client.send_json(chunk.model_dump(exclude_none=True))
 
         self.agi.set_stream_callback(stream_callback)
         for runner_id, tool_calls in self.agi.pending_tool_calls_by_runner():
             await self._send_tool_calls(runner_id, tool_calls)
+
+    def start_trigger(self, text: str, trigger_id: str) -> None:
+        """Reserve a turn before its background task starts."""
+        self.trigger_id = trigger_id
+        self._trigger_open = True
+        self.agi.set_trigger(trigger_id)
+        LogInterface.start_trigger(self.session_id, trigger_id)
+        self.active_trigger_task = asyncio.create_task(self.trigger_agent(text))
+
+    def accepts_trigger(self, trigger_id: str | None) -> bool:
+        """Discard results and subagent requests from cancelled or previous turns."""
+        return not self._stopping and (trigger_id is None or (self._trigger_open and trigger_id == self.trigger_id))
+
+    def _finish_turn(self, chunk: AgentResponseChunk) -> None:
+        """Release turn state consistently after completion, cancellation, or error."""
+        LogInterface.complete_trigger(self.session_id)
+        self.agi.reset_after_stop()
+        self.active_trigger_task = None
+        self._trigger_open = False
+        self._stopping = False
+        self._terminal_chunk = chunk
+
+    async def stop(self, trigger_id: str | None = None) -> AgentResponseChunk | None:
+        """Return the terminal result after cancellation and persistence finish."""
+        async with self._completion_lock:
+            if self._trigger_open and trigger_id is not None and trigger_id != self.trigger_id:
+                return None
+            if not self._trigger_open:
+                terminal = self._terminal_chunk
+                return terminal if terminal and trigger_id in (None, terminal.trigger_id) else None
+            self._stopping = True
+            tasks = self.agi.execution_tasks() | self.subagent_tasks
+            if self.active_trigger_task is not None:
+                tasks.add(self.active_trigger_task)
+            tasks = {task for task in tasks if not task.done() and task is not asyncio.current_task()}
+            try:
+                for task in tasks:
+                    task.cancel()
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                text = self.agi.accumulated_assistant_text
+                if text:
+                    await self.append_message("assistant", text)
+                await LogInterface.cancel_trigger(self.session_id, self.trigger_id, text)
+            finally:
+                terminal = AgentResponseChunk(
+                    type="agent_chunk", text=self.agi.accumulated_assistant_text,
+                    finished=True, cancelled=True, trigger_id=self.trigger_id,
+                    runner_id=self.agi.runner_id, runner_name="main",
+                )
+                self._finish_turn(terminal)
+        # HTTP carries the same result even when the WebSocket is disconnected.
+        if self.client is not None:
+            try:
+                await self.client.send_json(terminal.model_dump(exclude_none=True))
+            except (OSError, RuntimeError, WebSocketDisconnect):
+                pass
+        return terminal
 
     def register_operator(self, operator_data: dict):
         """Forward serialized operator data to AGI for registration."""
@@ -158,11 +223,11 @@ class RealtimeSession:
         try:
             message = {"type": "invoke", "text": text}
 
-            # Fetch history before this turn's message
-            history = await self.load_messages()
-            # A durable UUID message_id names the corresponding trigger-log file.
-            trigger_id = await self.append_message("user", text)
-            LogInterface.start_trigger(self.session_id, trigger_id)
+            # Do not interrupt a message halfway between PostgreSQL and Redis.
+            async with self._completion_lock:
+                history = await self.load_messages()
+                message_id = await self.append_message("user", text)
+                LogInterface.start_trigger(self.session_id, self.trigger_id, message_id=message_id)
 
             # Trigger agent with history; AGI owns the in-progress invoke state.
             await self.agi.trigger(
@@ -172,16 +237,18 @@ class RealtimeSession:
         except Exception as e:
             if self.active_trigger_task not in (None, current_task):
                 raise
-            LogInterface.complete_trigger(self.session_id)
-            if self.active_trigger_task is current_task:
-                self.active_trigger_task = None
+            if not self._trigger_open and self._terminal_chunk is not None:
+                return
             error_chunk = AgentResponseChunk(
                 type="agent_chunk",
                 text="Error Occurred",
                 finished=True,
                 runner_id=self.agi.runner_id,
                 runner_name="main",
+                trigger_id=self.trigger_id,
             )
+            async with self._completion_lock:
+                self._finish_turn(error_chunk)
             if self.client is not None:
                 await self.client.send_json(error_chunk.model_dump())
         finally:
@@ -275,6 +342,7 @@ class RealtimeSession:
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
                 arguments=_tool_arguments_to_object(tool_call.arguments),
+                trigger_id=self.trigger_id,
             )
             await self.client.send_json(message.model_dump(exclude_none=True))
 

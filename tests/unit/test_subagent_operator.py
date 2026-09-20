@@ -15,7 +15,7 @@ class _CandidateOperator(AgentOperator):
         return "1. Search\n2. Summarize"
 
     @agent_tool(description="Search candidate records")
-    def search(self, query: str):
+    async def search(self, query: str):
         return query
 
 

@@ -123,6 +123,38 @@ The model requests the tool, the service sends that request over WebSocket, and 
 
 Type annotations and `:param` docstrings build the tool argument schema. `count_limit=2` allows at most two executions of this tool per trigger; counters reset on the next trigger. Use `on_event` to observe model invocation and tool execution events.
 
+## Stop a Turn
+
+`await client.stop()` interrupts the active turn, including its subagents and tool waits, while keeping the session connected. It returns after the backend has saved partial text and released the agent. The HTTP response includes the terminal result, so stop does not depend on receiving a WebSocket completion event. The interrupted `trigger()` returns that partial text, and the next trigger can use it as conversation history. Calling `stop()` while idle does nothing.
+
+Run the trigger as a task so a UI action or another coroutine can stop it:
+
+```python
+async def main():
+    """Stop shortly after text starts, then ask about the partial response."""
+    await DynamicAgentClient.connect("http://localhost:7777")
+    client = await DynamicAgentClient.create(setting="Reply in English.")
+    text_started = asyncio.Event()
+
+    def on_chunk(chunk):
+        """Signal when the first text arrives."""
+        if chunk.text and not chunk.finished:
+            text_started.set()
+
+    pending = asyncio.create_task(client.trigger("Tell me a long story.", on_chunk=on_chunk))
+    await text_started.wait()
+    await asyncio.sleep(0.05)
+    await client.stop()
+    partial = await pending
+    print(partial)
+    answer = await client.trigger("What did you say before I stopped you?")
+    print(answer)
+    await client.close()
+    await ServiceHandler.stop()
+```
+
+Use the imports and `asyncio.run(main())` from the Chat example. A Stop button can call `client.stop()` directly while the trigger task is running. All tools must use `async def` and nonblocking operations; tool tasks receive cancellation. Stop does not undo external actions a tool already performed.
+
 ## Session Lifetime
 
 - `await client.close()` closes the client connection. `reconnect_keep` defaults to 30 seconds; expired session objects and Redis caches are removed by periodic cleanup.

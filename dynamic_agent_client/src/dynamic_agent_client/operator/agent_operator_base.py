@@ -94,6 +94,9 @@ def agent_tool(description: str = "", count_limit: int | None = None, max_calls_
         if not params or params[0] != 'self':
             raise ValueError("@agent_tool can only decorate class methods")
 
+        if not inspect.iscoroutinefunction(func):
+            raise TypeError("@agent_tool methods must use async def")
+
         func._agent_tool_schema = _build_schema(func, description)
         func._agent_tool_count_limit = count_limit if count_limit is not None else max_calls_per_trigger
         return func
@@ -151,6 +154,7 @@ class AgentOperator(ABC):
         self.session_id: str | None = None
         self.runner_id: str | None = None
         self.tool_call_id: str | None = None
+        self.trigger_id: str | None = None
         self._collect_tools()
 
     def _collect_tools(self):
@@ -209,7 +213,7 @@ class AgentOperator(ABC):
             flows=flows,
         )
 
-    def execute(self, tool_name: str, arguments: dict):
+    async def execute(self, tool_name: str, arguments: dict):
         """Execute a tool by name with given arguments."""
         if tool_name not in self._tools:
             raise ValueError(f"Tool {tool_name} not found in operator")
@@ -226,7 +230,7 @@ class AgentOperator(ABC):
 
         self._tool_call_counts[tool_name] = current_count + 1
         callable_func = tool_info["callable"]
-        return callable_func(**arguments)
+        return await callable_func(**arguments)
 
     def reset_tool_counters(self) -> None:
         """Reset per-trigger tool call counters."""

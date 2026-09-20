@@ -2,7 +2,6 @@
 This acts as a final wrapper to user
 """
 import asyncio
-import inspect
 import json
 from typing import Callable
 from uuid import uuid4
@@ -34,7 +33,10 @@ class DynamicAgentClient:
         self._on_event: Callable[[AgentEvent], None] | None = None
         self._accumulated_text = ""
         self._active_invocations: dict[str, AgentInvocationEvent] = {}
-        self._response_done = asyncio.Event()
+        self._trigger_id: str | None = None
+        self._trigger_future: asyncio.Future | None = None
+        self._trigger_accepted = asyncio.Event()
+        self._stopping_trigger: str | None = None
         self._listen_task = None
         self._tool_tasks: set[asyncio.Task] = set()
         self._connected = True
@@ -45,7 +47,7 @@ class DynamicAgentClient:
 
     @classmethod
     async def connect(cls, server_addr: str):
-        """Start the shared webhook server and store the service address."""
+        """Configure the shared backend address and HTTP client."""
         await ServiceHandler.connect(server_addr)
 
     @classmethod
@@ -81,35 +83,23 @@ class DynamicAgentClient:
                     print(f"[websocket] ERROR: Invalid service message: {exc}")
                     continue
 
+                if service_message.trigger_id is not None and service_message.trigger_id != self._trigger_id:
+                    continue
+                if self._stopping_trigger is not None and isinstance(service_message, AgentToolCallMessage):
+                    continue
+
                 if isinstance(service_message, AgentResponseChunk):
-                    text = service_message.text
-                    is_main_runner = service_message.runner_id in (None, self.runner_id)
-
-                    invocation = self._accumulate_invocation(service_message)
-
-                    if self._on_chunk:
-                        try:
-                            self._on_chunk(service_message)
-                        except Exception as exc:
-                            print(f"[agent_chunk] WARNING: callback failed: {exc}")
-
-                    if invocation is not None:
-                        self._emit_event(invocation)
-
-                    if service_message.finished and service_message.parent_tool_call_id:
+                    if not self._handle_response_chunk(service_message):
+                        continue
+                    if service_message.finished and service_message.parent_tool_call_id and not service_message.cancelled:
                         await ServiceHandler.send_tool_result(
                             session_id=self.session_id,
                             runner_id=service_message.parent_runner_id,
                             tool_call_id=service_message.parent_tool_call_id,
                             ok=True,
-                            result=text,
+                            result=service_message.text,
+                            trigger_id=service_message.trigger_id,
                         )
-
-                    if text and is_main_runner:
-                        self._accumulated_text += text
-
-                    if service_message.finished and is_main_runner:
-                        self._response_done.set()
                 elif isinstance(service_message, AgentToolCallMessage):
                     task = asyncio.create_task(self._handle_tool_call(service_message))
                     self._tool_tasks.add(task)
@@ -119,7 +109,42 @@ class DynamicAgentClient:
         except asyncio.CancelledError:
             pass
 
-        self._connected = False
+        finally:
+            self._connected = False
+            if self._stopping_trigger is None:
+                self._fail_turn(ConnectionError("WebSocket disconnected before turn completion"))
+
+    def _fail_turn(self, error: Exception) -> None:
+        if self._trigger_future is not None and not self._trigger_future.done():
+            self._trigger_future.set_exception(error)
+
+    def _handle_response_chunk(self, chunk: AgentResponseChunk) -> bool:
+        """Handle HTTP and WebSocket completion once, using the same turn ID."""
+        if chunk.trigger_id is not None and chunk.trigger_id != self._trigger_id:
+            return False
+        is_main = chunk.runner_id in (None, self.runner_id)
+        if is_main and self._trigger_future is not None and self._trigger_future.done():
+            return False
+        invocation = self._accumulate_invocation(chunk)
+        if chunk.cancelled and is_main:
+            for task in tuple(self._tool_tasks):
+                task.cancel()
+        if is_main:
+            if chunk.finished:
+                if chunk.text or chunk.cancelled:
+                    self._accumulated_text = chunk.text
+            else:
+                self._accumulated_text += chunk.text
+        if self._on_chunk and (self._stopping_trigger is None or chunk.finished):
+            try:
+                self._on_chunk(chunk)
+            except Exception as exc:
+                print(f"[agent_chunk] WARNING: callback failed: {exc}")
+        if invocation is not None:
+            self._emit_event(invocation)
+        if chunk.finished and is_main and self._trigger_future is not None:
+            self._trigger_future.set_result(self._accumulated_text)
+        return True
 
     def _runner_key(self, runner_id: str | None) -> str:
         """Return a stable local key for a main or subagent runner."""
@@ -131,6 +156,12 @@ class DynamicAgentClient:
     ) -> AgentInvocationEvent | None:
         """Build one high-level invocation from a runner's streamed chunks."""
         runner_id = self._runner_key(chunk.runner_id)
+        if chunk.cancelled:
+            invocation = self._active_invocations.pop(runner_id, None)
+            if invocation is not None:
+                invocation.cancelled = True
+                invocation.finished = True
+            return invocation
         if chunk.finished and not chunk.invoked:
             return None
         invocation = self._active_invocations.get(runner_id)
@@ -139,6 +170,7 @@ class DynamicAgentClient:
                 session_id=self.session_id,
                 invocation_id=uuid4().hex,
                 runner_id=runner_id,
+                trigger_id=chunk.trigger_id,
             )
             self._active_invocations[runner_id] = invocation
 
@@ -192,15 +224,23 @@ class DynamicAgentClient:
             name=llm_tool_name,
             arguments=arguments,
             status="started",
+            trigger_id=tool_call.trigger_id,
         ))
         try:
             callable_func = self.tool_map[runner_id][llm_tool_name]
             callable_func.operator.session_id = self.session_id
             callable_func.operator.runner_id = runner_id
             callable_func.operator.tool_call_id = tool_call_id
-            result = callable_func(**arguments)
-            if inspect.isawaitable(result):
-                result = await result
+            callable_func.operator.trigger_id = tool_call.trigger_id
+            result = await callable_func(**arguments)
+        except asyncio.CancelledError:
+            if tool_call.trigger_id == self._trigger_id:
+                self._emit_event(ToolExecutionEvent(
+                    session_id=self.session_id, runner_id=runner_id,
+                    tool_call_id=tool_call_id, name=llm_tool_name,
+                    arguments=arguments, status="cancelled", trigger_id=tool_call.trigger_id,
+                ))
+            raise
         except KeyError:
             ok = False
             result = f"Tool not found: {llm_tool_name}"
@@ -212,6 +252,10 @@ class DynamicAgentClient:
             error = str(exc)
             print(f"[tool_call] ERROR: {result}")
 
+        if tool_call.trigger_id is not None and (
+            tool_call.trigger_id != self._trigger_id or tool_call.trigger_id == self._stopping_trigger
+        ):
+            return
         self._emit_event(ToolExecutionEvent(
             session_id=self.session_id,
             runner_id=runner_id,
@@ -221,6 +265,7 @@ class DynamicAgentClient:
             status="succeeded" if ok else "failed",
             result=result if ok else None,
             error=error,
+            trigger_id=tool_call.trigger_id,
         ))
 
         if result is None:
@@ -232,6 +277,7 @@ class DynamicAgentClient:
             tool_call_id=tool_call_id,
             ok=ok,
             result=result,
+            trigger_id=tool_call.trigger_id,
         )
 
     async def trigger(
@@ -240,23 +286,60 @@ class DynamicAgentClient:
         on_chunk: Callable[[AgentResponseChunk], None] = None,
         on_event: Callable[[AgentEvent], None] = None,
     ):
+        """Run a turn and return its full or stopped partial response."""
+        if self._trigger_future is not None and not self._trigger_future.done():
+            raise RuntimeError("A turn is already active")
         await self._ensure_connected()
 
+        if self._trigger_future is not None and not self._trigger_future.done():
+            raise RuntimeError("A turn is already active")
+        self._trigger_id = uuid4().hex
+        self._stopping_trigger = None
+        self._trigger_accepted = asyncio.Event()
+        accepted = self._trigger_accepted
+        future = asyncio.get_running_loop().create_future()
+        self._trigger_future = future
         self._on_chunk = on_chunk
         self._on_event = on_event
         self._accumulated_text = ""
         self._active_invocations.clear()
-        self._response_done.clear()
         for operator in self._operators:
             operator.reset_tool_counters()
 
         # Fire HTTP trigger, response streams via WebSocket
-        await ServiceHandler.trigger(self.session_id, text)
-        # Wait for streaming response to complete
-        await self._response_done.wait()
-        result = self._accumulated_text
-        self._accumulated_text = ""
-        return result
+        try:
+            await ServiceHandler.trigger(self.session_id, text, trigger_id=self._trigger_id)
+        except BaseException:
+            future.cancel()
+            raise
+        finally:
+            accepted.set()
+        return await asyncio.shield(future)
+
+    async def stop(self) -> None:
+        """Stop the current turn and keep the session ready for another trigger."""
+        future = self._trigger_future
+        trigger_id = self._trigger_id
+        if future is None or future.done():
+            return
+        self._stopping_trigger = trigger_id
+        for task in tuple(self._tool_tasks):
+            task.cancel()
+        await self._trigger_accepted.wait()
+        if future.cancelled():
+            return
+        try:
+            response = await ServiceHandler.stop_trigger(self.session_id, trigger_id)
+            completion = response.get("completion")
+            if completion is not None:
+                self._handle_response_chunk(AgentResponseChunk.model_validate(completion))
+            elif not future.done():
+                raise RuntimeError("Stop returned without a completion for the active turn")
+        except Exception as exc:
+            if not future.done():
+                future.set_exception(exc)
+            raise
+        await asyncio.shield(future)
 
     async def add_operator(self, operator):
         if not isinstance(operator, AgentOperator):
@@ -305,6 +388,7 @@ class DynamicAgentClient:
             return False
 
     async def close(self):
+        self._fail_turn(ConnectionError("Client closed before turn completion"))
         self._needs_reconnect = False
         if self._listen_task:
             self._listen_task.cancel()

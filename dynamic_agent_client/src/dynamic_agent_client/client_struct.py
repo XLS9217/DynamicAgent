@@ -9,6 +9,8 @@ class AgentResponseChunk(BaseModel):
     type: Literal["agent_chunk"]
     text: str
     finished: bool = False
+    cancelled: bool = False
+    trigger_id: str | None = None
     invoked: bool = False
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -36,6 +38,8 @@ class AgentInvocationEvent(BaseModel):
     parent_runner_id: str | None = None
     parent_tool_call_id: str | None = None
     finished: bool = False
+    cancelled: bool = False
+    trigger_id: str | None = None
     text: str = ""
     prompt_tokens: int | None = Field(default=None, ge=0)
     completion_tokens: int | None = Field(default=None, ge=0)
@@ -51,7 +55,8 @@ class ToolExecutionEvent(BaseModel):
     tool_call_id: str
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
-    status: Literal["started", "succeeded", "failed"]
+    status: Literal["started", "succeeded", "failed", "cancelled"]
+    trigger_id: str | None = None
     result: Any | None = None
     error: str | None = None
 
@@ -71,6 +76,7 @@ class AgentToolCallMessage(BaseModel):
     tool_call_id: str
     name: str
     arguments: dict = Field(default_factory=dict)
+    trigger_id: str | None = None
 
 
 ServiceToClientMessage = Annotated[

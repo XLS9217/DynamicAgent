@@ -52,6 +52,12 @@ Tools must use `async def` and nonblocking I/O; synchronous tools are rejected b
 
 `client.stop()` cancels tool tasks. Use awaitable operations so cancellation can interrupt waits. Tool cancellation does not roll back external actions.
 
+## Argument Schemas
+
+The decorator uses Pydantic to generate argument schemas from annotations and defaults. It supports integers, numbers, objects, nested lists and dictionaries, unions, nullable types, `Literal` enums, and Pydantic models with field constraints. Parameters without defaults are required; a nullable annotation alone does not make a parameter optional.
+
+Docstring `:param` descriptions are preserved. Nested model definitions remain in the schema's `$defs`. This generates ordinary function-tool schemas; it does not enable strict tool calling or perform runtime argument validation. Incoming objects remain dictionaries; call `YourModel.model_validate(value)` inside the tool if you need a model instance.
+
 ## Official Operator: `SubagentOperator`
 
 `SubagentOperator` is the SDK's current built-in operator. It lets the model create subagents and delegate tasks within the same session. You provide candidate operator instances; the model chooses which ones each subagent receives.

@@ -1,11 +1,12 @@
+"""Script name: agent_operator_base.py. Define async tools and generate their schemas."""
 
 import inspect
 import re
 from abc import ABC
-from typing import Callable, get_args, get_origin, get_type_hints
+from typing import Callable, get_type_hints
 from logging import getLogger
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, create_model
 
 logger = getLogger(__name__)
 
@@ -28,52 +29,27 @@ def _parse_docstring_params(docstring: str | None) -> dict[str, str]:
 
 
 def _build_schema(func: Callable, description: str) -> dict:
-    """Build OpenAI function schema for a method (skips self)"""
-    sig = inspect.signature(func)
-    try:
-        type_hints = get_type_hints(func)
-    except Exception:
-        type_hints = {}
-
+    """Generate a tool's argument schema from annotations, defaults, and docstrings."""
+    type_hints = get_type_hints(func, include_extras=True)
     param_descriptions = _parse_docstring_params(func.__doc__)
+    fields = {}
 
-    properties = {}
-    required = []
-
-    for param_name, param in sig.parameters.items():
-        if param_name == 'self':
+    # Tool arguments arrive as named JSON fields.
+    for name, param in inspect.signature(func).parameters.items():
+        if name == "self":
             continue
+        if param.kind not in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+            raise TypeError(f"Tool {func.__qualname__}: {name} must be a named parameter")
+        default = ... if param.default is inspect.Parameter.empty else param.default
+        field = Field(default=default, description=param_descriptions[name]) if name in param_descriptions else default
+        fields[name] = (type_hints.get(name, str), field)
 
-        param_type = type_hints.get(param_name, str)
-
-        origin = get_origin(param_type)
-        args = get_args(param_type)
-
-        if origin is list and args and args[0] is str:
-            prop_schema = {"type": "array", "items": {"type": "string"}}
-        else:
-            json_type = "string"
-            if param_type in (int, float):
-                json_type = "number"
-            elif param_type is bool:
-                json_type = "boolean"
-            prop_schema = {"type": json_type}
-        if param_name in param_descriptions:
-            prop_schema["description"] = param_descriptions[param_name]
-
-        properties[param_name] = prop_schema
-
-        if param.default == inspect.Parameter.empty:
-            required.append(param_name)
-
+    # Keep nested definitions and references together in the parameter schema.
+    arguments_model = create_model(f"{func.__name__}Arguments", **fields)
     return {
         "name": func.__name__,
         "description": description or func.__doc__ or "",
-        "parameters": {
-            "type": "object",
-            "properties": properties,
-            "required": required,
-        },
+        "parameters": arguments_model.model_json_schema(),
     }
 
 

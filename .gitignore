@@ -11,3 +11,6 @@ wheels/
 
 # Temporary local endpoint test with credentials
 /test_lan_model.py
+
+# Local model capability experiments
+/experiment/

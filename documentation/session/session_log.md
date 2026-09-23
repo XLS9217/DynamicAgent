@@ -4,7 +4,7 @@ Conversation messages and model invocation logs are stored separately and linked
 
 | Content | Location | Description |
 | --- | --- | --- |
-| Persisted messages | PostgreSQL `session_message` | Message ID, session ID, creation time, role, and content |
+| Persisted messages | PostgreSQL `session_message` | Message ID, session ID, creation time, and versioned JSONB content |
 | Live message cache | Redis `session:{session_id}:messages` | Ordered JSON messages, each containing `role` and `content` |
 | Model invocation logs | `{CACHE_DIR}/trigger_log/{trigger_id}.jsonl` | One JSON line per completed model call; `CACHE_DIR` defaults to `.cache` |
 

@@ -1,6 +1,7 @@
 """Reusable helpers for checking session-message storage in integration tests."""
 
 import asyncio
+import json
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -80,14 +81,19 @@ async def get_postgres_session_messages(session_id: str) -> list[MessageItem]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT role, content
+            SELECT content
             FROM session_message
             WHERE session_id = $1
             ORDER BY create_at
             """,
             session_id,
         )
-    return [MessageItem(role=row["role"], content=row["content"]) for row in rows]
+    return [
+        MessageItem.model_validate(
+            json.loads(row["content"]) if isinstance(row["content"], str) else row["content"]
+        )
+        for row in rows
+    ]
 
 
 async def get_redis_session_messages(session_id: str) -> list[MessageItem]:
@@ -124,15 +130,15 @@ async def session_exists_in_redis(session_id: str) -> bool:
     return bool(await redis.exists(session_messages_key(session_id)))
 
 
-def _message_dicts(messages: Sequence[MessageItem]) -> list[dict[str, str]]:
-    return [message.model_dump() for message in messages]
+def _message_dicts(messages: Sequence[MessageItem]) -> list[dict]:
+    return [message.public_message() for message in messages]
 
 
 def _expected_message_dicts(
     messages: Sequence[MessageItem | Mapping[str, str]],
 ) -> list[dict[str, str]]:
     return [
-        message.model_dump() if isinstance(message, MessageItem) else dict(message)
+        message.public_message() if isinstance(message, MessageItem) else dict(message)
         for message in messages
     ]
 

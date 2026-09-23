@@ -10,9 +10,17 @@ from dynamic_agent_service.agent.agent_general_interface import AgentGeneralInte
 from dynamic_agent_service.agent.agent_structs import AgentState, AgentToolCall
 from dynamic_agent_service.external_service.openai_resource_accessor import OpenAIResourceAccessor
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
-from dynamic_agent_service.service.service_structs import CreateSessionRequest
+from dynamic_agent_service.service.media_storage import MediaStorage
+from dynamic_agent_service.service.service_structs import (
+    CreateSessionRequest,
+    MessageItem,
+    StoredImagePart,
+)
 from dynamic_agent_service.logging.log_interface import LogInterface
+from dynamic_agent_service.logging.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_accessor import SessionAccessor
+
+logger = get_my_logger()
 
 def _sanitize_json(raw: str) -> str:
     """Fix common LLM JSON quirks like leading zeros (e.g. 00.5 -> 0.5)."""
@@ -53,6 +61,7 @@ class RealtimeSession:
         self._terminal_chunk: AgentResponseChunk | None = None
         self._stopping = False
         self._completion_lock = asyncio.Lock()
+        self._uncommitted_images: list[StoredImagePart] = []
 
     @property
     def state(self) -> AgentState:
@@ -73,21 +82,23 @@ class RealtimeSession:
     async def append_message(
         self,
         role: str,
-        content: str,
+        content: str | MessageItem,
     ) -> str:
         """Store a message in both backends and return its UUID."""
         return await SessionAccessor.append_message(
             self.session_id,
-            role,
-            content,
+            content if isinstance(content, MessageItem) else MessageItem.from_text(role, content),
         )
 
     async def load_messages(self) -> list[dict]:
-        """Load cached history, restoring it from PostgreSQL when needed."""
-        messages = await SessionAccessor.load_messages(
-            self.session_id,
-        )
-        return [m.model_dump() for m in messages]
+        """Load public history without filesystem paths or encoded image bytes."""
+        messages = await SessionAccessor.load_messages(self.session_id)
+        return [message.public_message() for message in messages]
+
+    async def load_model_messages(self) -> list[dict]:
+        """Materialize stored image references for one model turn."""
+        messages = await SessionAccessor.load_messages(self.session_id)
+        return [await MediaStorage.materialize(message) for message in messages]
 
     async def agent_setup(self):
         resource = await OpenAIResourceAccessor.get_active_resource()
@@ -136,13 +147,19 @@ class RealtimeSession:
         for runner_id, tool_calls in self.agi.pending_tool_calls_by_runner():
             await self._send_tool_calls(runner_id, tool_calls)
 
-    def start_trigger(self, text: str, trigger_id: str) -> None:
+    def start_trigger(
+        self,
+        text: str,
+        trigger_id: str,
+        images: list[StoredImagePart] | None = None,
+    ) -> None:
         """Reserve a turn before its background task starts."""
         self.trigger_id = trigger_id
         self._trigger_open = True
         self.agi.set_trigger(trigger_id)
         LogInterface.start_trigger(self.session_id, trigger_id)
-        self.active_trigger_task = asyncio.create_task(self.trigger_agent(text))
+        self._uncommitted_images = list(images or [])
+        self.active_trigger_task = asyncio.create_task(self.trigger_agent(text, images=images))
 
     def accepts_trigger(self, trigger_id: str | None) -> bool:
         """Discard results and subagent requests from cancelled or previous turns."""
@@ -175,6 +192,8 @@ class RealtimeSession:
                     task.cancel()
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
+                await MediaStorage.delete(self._uncommitted_images)
+                self._uncommitted_images = []
                 text = self.agi.accumulated_assistant_text
                 if text:
                     await self.append_message("assistant", text)
@@ -212,8 +231,12 @@ class RealtimeSession:
         except Exception:
             pass
 
-    async def trigger_agent(self, text: str):
-        """Trigger agent with text input. Response streams via WebSocket."""
+    async def trigger_agent(
+        self,
+        text: str,
+        images: list[StoredImagePart] | None = None,
+    ):
+        """Persist and invoke one text or multimodal user message."""
         if self.client is None:
             raise RuntimeError("WebSocket not connected")
         if self.agi.state is not AgentState.IDLE:
@@ -221,13 +244,24 @@ class RealtimeSession:
 
         current_task = asyncio.current_task()
         try:
-            message = {"type": "invoke", "text": text}
+            user_message = MessageItem.from_user(text, images)
 
             # Do not interrupt a message halfway between PostgreSQL and Redis.
             async with self._completion_lock:
-                history = await self.load_messages()
-                message_id = await self.append_message("user", text)
+                history = await self.load_model_messages()
+                try:
+                    message_id = await self.append_message("user", user_message)
+                except BaseException:
+                    await MediaStorage.delete(images or [])
+                    self._uncommitted_images = []
+                    raise
+                self._uncommitted_images = []
                 LogInterface.start_trigger(self.session_id, self.trigger_id, message_id=message_id)
+
+            message = {
+                "type": "invoke",
+                "content": (await MediaStorage.materialize(user_message))["content"],
+            }
 
             # Trigger agent with history; AGI owns the in-progress invoke state.
             await self.agi.trigger(
@@ -235,6 +269,14 @@ class RealtimeSession:
                 history=history,
             )
         except Exception as e:
+            logger.exception(
+                "Turn failed for session %s trigger %s: %s",
+                self.session_id,
+                self.trigger_id,
+                e,
+            )
+            await MediaStorage.delete(self._uncommitted_images)
+            self._uncommitted_images = []
             if self.active_trigger_task not in (None, current_task):
                 raise
             if not self._trigger_open and self._terminal_chunk is not None:

@@ -44,6 +44,7 @@ class FancySchemaOperator(AgentOperator):
         assert type(metadata) is dict
         assert type(count) is int
         assert type(ratio) is float
+        assert type(ratio) is float
         assert type(enabled) is bool
         assert type(label) is str
         arguments = dict(metadata=metadata, count=count, ratio=ratio, enabled=enabled, label=label)

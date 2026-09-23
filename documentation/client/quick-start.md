@@ -60,6 +60,24 @@ asyncio.run(main())
 
 `trigger()` waits for the turn to finish and returns the response text. Await each turn before starting another on the same session. To receive streaming chunks, pass an `on_chunk` callback to `trigger()`.
 
+## Image Input
+
+Pass local image paths with the optional `images` argument. The SDK uploads raw
+file bytes to the service; it does not place base64 data in the trigger JSON.
+
+```python
+answer = await client.trigger(
+    "What is happening in this image?",
+    images=["photo.png"],
+)
+```
+
+The service validates and stores images below `MEDIA_DIR`. PostgreSQL and Redis
+store media references only. Images referenced by the selected session history
+are converted to temporary provider content blocks immediately before each
+model turn. PNG, JPEG, WebP, and GIF files are supported. The active model must
+support vision input.
+
 ## Tool
 
 An `AgentOperator` exposes client-side Python methods to the model. Decorate callable methods with `@agent_tool`, describe the operator, and register it before triggering the agent.

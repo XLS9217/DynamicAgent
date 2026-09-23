@@ -21,7 +21,7 @@ class StopTurnTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         """Create a session with isolated persistence and a controlled model."""
         self.session = RealtimeSession(setting="test", session_id="stop-unit")
-        self.session.load_messages = AsyncMock(return_value=[])
+        self.session.load_model_messages = AsyncMock(return_value=[])
         self.session.append_message = AsyncMock(return_value="message-id")
         self.session.agi = await AgentGeneralInterface.create(openai_adapter=MagicMock())
         self.socket = AsyncMock()

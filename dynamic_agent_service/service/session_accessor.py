@@ -1,12 +1,14 @@
-"""Session messages are written to PostgreSQL and cached in Redis.
+"""Session message documents are written to PostgreSQL and cached in Redis.
 
 Reads use Redis first and restore the cache from PostgreSQL on a cache miss.
 """
+import json
 import uuid
 
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.external_service.redis_instance import RedisInstance
-from dynamic_agent_service.service.service_structs import MessageItem
+from dynamic_agent_service.service.media_storage import MediaStorage
+from dynamic_agent_service.service.service_structs import MessageItem, StoredImagePart
 
 
 def _messages_key(session_id: str) -> str:
@@ -18,21 +20,18 @@ class SessionAccessor:
     @staticmethod
     async def append_message(
         session_id: str,
-        role: str,
-        content: str,
+        item: MessageItem,
     ) -> str:
-        """Append one message to PostgreSQL and Redis."""
-        item = MessageItem(role=role, content=content)
-
+        """Append one JSONB message document to PostgreSQL and Redis."""
         message_id = str(uuid.uuid4())
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO session_message (message_id, session_id, role, content)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO session_message (message_id, session_id, content)
+                VALUES ($1, $2, $3::jsonb)
                 """,
-                message_id, session_id, role, content,
+                message_id, session_id, item.model_dump_json(),
             )
 
         redis = RedisInstance.get_client()
@@ -51,10 +50,10 @@ class SessionAccessor:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT role, content FROM session_message WHERE session_id = $1 ORDER BY create_at",
+                "SELECT content FROM session_message WHERE session_id = $1 ORDER BY create_at, message_id",
                 session_id,
             )
-        messages = [MessageItem(role=r["role"], content=r["content"]) for r in rows]
+        messages = [SessionAccessor._parse_content(row["content"]) for row in rows]
 
         if messages:
             await redis.rpush(_messages_key(session_id), *[m.model_dump_json() for m in messages])
@@ -69,10 +68,26 @@ class SessionAccessor:
 
     @staticmethod
     async def delete_session(session_id: str) -> None:
-        """Delete a session's messages from both Postgres and Redis."""
+        """Delete a session's messages, cache, and referenced media files."""
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT content FROM session_message WHERE session_id = $1",
+                session_id,
+            )
             await conn.execute("DELETE FROM session_message WHERE session_id = $1", session_id)
 
         redis = RedisInstance.get_client()
         await redis.delete(_messages_key(session_id))
+        images = [
+            part
+            for row in rows
+            for part in SessionAccessor._parse_content(row["content"]).parts
+            if isinstance(part, StoredImagePart)
+        ]
+        await MediaStorage.delete(images)
+
+    @staticmethod
+    def _parse_content(value: str | dict) -> MessageItem:
+        """Validate JSONB returned as either decoded data or a JSON string."""
+        return MessageItem.model_validate(json.loads(value) if isinstance(value, str) else value)

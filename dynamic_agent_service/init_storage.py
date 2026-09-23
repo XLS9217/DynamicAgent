@@ -20,12 +20,13 @@ CREATE TABLE IF NOT EXISTS session_message (
     message_id UUID PRIMARY KEY,
     create_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     session_id TEXT NOT NULL,
-    role       TEXT NOT NULL,
-    content    TEXT NOT NULL
+    content    JSONB NOT NULL,
+    CONSTRAINT session_message_content_is_object
+        CHECK (jsonb_typeof(content) = 'object')
 );
 
-CREATE INDEX IF NOT EXISTS idx_session_message_session_id
-    ON session_message (session_id, create_at);
+CREATE INDEX IF NOT EXISTS idx_session_message_history
+    ON session_message (session_id, create_at, message_id);
 
 CREATE TABLE IF NOT EXISTS openai_resource (
     resource_id TEXT PRIMARY KEY,

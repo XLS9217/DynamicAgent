@@ -1,12 +1,13 @@
 import asyncio
 from uuid import uuid4
 
-from fastapi import APIRouter, WebSocket, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket
 from pydantic import BaseModel, Field
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
 from dynamic_agent_service.agent.agent_structs import AgentState
 from dynamic_agent_service.service.session_accessor import SessionAccessor
+from dynamic_agent_service.service.media_storage import MediaStorage
 from dynamic_agent_service.service.service_structs import (
     CreateSessionRequest,
     InitSubagentRequest,
@@ -171,6 +172,32 @@ async def trigger(body: TriggerRequest):
     trigger_id = body.trigger_id or uuid4().hex
     session.start_trigger(body.text, trigger_id)
     return {"status": "accepted", "trigger_id": trigger_id}
+
+
+@router.post("/trigger_media")
+async def trigger_media(
+    session_id: str = Form(...),
+    text: str = Form(""),
+    trigger_id: str | None = Form(None, pattern=r"^[a-zA-Z0-9_-]{1,128}$"),
+    images: list[UploadFile] = File(...),
+):
+    """Accept raw image uploads and start one multimodal turn."""
+    session = RealtimeSessionManager.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.state is not AgentState.IDLE:
+        raise HTTPException(status_code=409, detail=f"Session is {session.state}")
+    accepted_trigger_id = trigger_id or uuid4().hex
+    stored_images = []
+    try:
+        stored_images = await MediaStorage.save_uploads(images)
+        session.start_trigger(text, accepted_trigger_id, images=stored_images)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except BaseException:
+        await MediaStorage.delete(stored_images)
+        raise
+    return {"status": "accepted", "trigger_id": accepted_trigger_id}
 
 
 @router.delete("/session/{session_id}")

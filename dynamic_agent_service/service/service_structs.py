@@ -1,4 +1,6 @@
-from typing import Optional
+from typing import Annotated, Literal, Optional
+from uuid import UUID
+
 from pydantic import BaseModel, Field, field_validator
 
 from dynamic_agent_client.client_struct import AgentResponseChunk
@@ -79,7 +81,69 @@ class SessionMeta(BaseModel):
     disconnect_time: Optional[float] = None  # set when WebSocket disconnects
 
 
+class TextPart(BaseModel):
+    """Store one text segment in its original position."""
+
+    type: Literal["text"] = "text"
+    text: str
+
+
+class StoredImagePart(BaseModel):
+    """Reference one validated image below MEDIA_DIR."""
+
+    type: Literal["image"] = "image"
+    media_id: UUID
+    relative_path: str
+    mime_type: Literal["image/png", "image/jpeg", "image/webp", "image/gif"]
+    byte_size: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    detail: Literal["auto", "low", "high"] = "auto"
+
+
+MessagePart = Annotated[TextPart | StoredImagePart, Field(discriminator="type")]
+
+
 class MessageItem(BaseModel):
-    """One conversation message. Each element of session:{session_id}:messages."""
-    role: str  # "system" | "user" | "assistant"
-    content: str
+    """Store one versioned conversation message in PostgreSQL and Redis."""
+
+    version: Literal[1] = 1
+    role: Literal["system", "user", "assistant", "tool"]
+    parts: list[MessagePart] = Field(min_length=1)
+
+    @classmethod
+    def from_text(cls, role: str, text: str) -> "MessageItem":
+        """Build a text-only message."""
+        return cls(role=role, parts=[TextPart(text=text)])
+
+    @classmethod
+    def from_user(
+        cls,
+        text: str,
+        images: list[StoredImagePart] | None = None,
+    ) -> "MessageItem":
+        """Build one user message while preserving text-before-image order."""
+        parts: list[MessagePart] = []
+        if text:
+            parts.append(TextPart(text=text))
+        parts.extend(images or [])
+        if not parts:
+            raise ValueError("A trigger requires text or at least one image")
+        return cls(role="user", parts=parts)
+
+    def public_message(self) -> dict:
+        """Return history without exposing server filesystem paths or hashes."""
+        if len(self.parts) == 1 and isinstance(self.parts[0], TextPart):
+            return {"role": self.role, "content": self.parts[0].text}
+        content = []
+        for part in self.parts:
+            if isinstance(part, TextPart):
+                content.append(part.model_dump())
+            else:
+                content.append({
+                    "type": "image",
+                    "media_id": str(part.media_id),
+                    "mime_type": part.mime_type,
+                    "byte_size": part.byte_size,
+                    "detail": part.detail,
+                })
+        return {"role": self.role, "content": content}

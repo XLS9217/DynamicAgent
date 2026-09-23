@@ -118,7 +118,7 @@ class AgentGeneralInterface:
         return interface
 
     async def trigger(self, message: dict, history: list | None = None) -> None:
-        messages = await self._forge_message_list(message.get("text", ""), history)
+        messages = await self._forge_message_list(message.get("content", ""), history)
         await self._runner.trigger(messages=messages, tools=self._parse_tool_list())
 
     async def invoke(self) -> None:
@@ -252,7 +252,11 @@ class AgentGeneralInterface:
             tools.extend(operator.get("tools", []))
         return tools
 
-    async def _forge_message_list(self, user_message: str, history: list | None = None) -> list:
+    async def _forge_message_list(
+        self,
+        user_message: str | list[dict],
+        history: list | None = None,
+    ) -> list:
         return self._build_message_list(
             setting=self._setting,
             operators=self._operator_list,
@@ -264,7 +268,7 @@ class AgentGeneralInterface:
         self,
         setting: str,
         operators: list[dict],
-        user_message: str,
+        user_message: str | list[dict],
         history: list | None = None,
     ) -> list[dict]:
         messages = [{

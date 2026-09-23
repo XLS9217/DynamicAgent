@@ -1,6 +1,9 @@
 """Script name: service_handler.py. Share backend HTTP access and register session clients."""
 import asyncio
+from contextlib import ExitStack
+import mimetypes
 import json
+from pathlib import Path
 import re
 
 import httpx
@@ -100,12 +103,31 @@ class ServiceHandler:
         return resp.json()
 
     @classmethod
-    async def trigger(cls, session_id: str, text: str, trigger_id: str | None = None):
-        """Trigger agent with text input via HTTP POST."""
-        resp = await cls._http.post(
-            f"{cls._server_addr}/trigger",
-            json={"session_id": session_id, "text": text, "trigger_id": trigger_id},
-        )
+    async def trigger(
+        cls,
+        session_id: str,
+        text: str,
+        trigger_id: str | None = None,
+        images: list[str | Path] | None = None,
+    ):
+        """Trigger a text turn or upload raw images for a multimodal turn."""
+        if not images:
+            resp = await cls._http.post(
+                f"{cls._server_addr}/trigger",
+                json={"session_id": session_id, "text": text, "trigger_id": trigger_id},
+            )
+        else:
+            with ExitStack() as stack:
+                files = []
+                for value in images:
+                    path = Path(value)
+                    media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                    files.append(("images", (path.name, stack.enter_context(path.open("rb")), media_type)))
+                resp = await cls._http.post(
+                    f"{cls._server_addr}/trigger_media",
+                    data={"session_id": session_id, "text": text, "trigger_id": trigger_id or ""},
+                    files=files,
+                )
         resp.raise_for_status()
         return resp.json()
 

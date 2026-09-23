@@ -50,13 +50,16 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         await self.connection.execute(
             """
-            INSERT INTO session_message (message_id, session_id, role, content)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO session_message (message_id, session_id, content)
+            VALUES ($1, $2, $3::jsonb)
             """,
             message_id,
             session_id,
-            "user",
-            "Integration logging request",
+            json.dumps({
+                "version": 1,
+                "role": "user",
+                "parts": [{"type": "text", "text": "Integration logging request"}],
+            }),
         )
         await self.connection.execute(
             """
@@ -74,7 +77,7 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
         )
 
         message_row = await self.connection.fetchrow(
-            "SELECT message_id, session_id, role, content FROM session_message WHERE message_id = $1",
+            "SELECT message_id, session_id, content FROM session_message WHERE message_id = $1",
             message_id,
         )
         resource_row = await self.connection.fetchrow(
@@ -86,13 +89,16 @@ class LogInterfaceIntegrationTest(unittest.IsolatedAsyncioTestCase):
 
         LogInterface.configure_resource(session_id, str(resource_row["resource_id"]))
         LogInterface.start_trigger(session_id, trigger_id, message_id=str(message_row["message_id"]))
+        stored_content = message_row["content"]
+        if isinstance(stored_content, str):
+            stored_content = json.loads(stored_content)
         invoke_id = await LogInterface.append_invoke_log(
             session_id=session_id,
             runner_id="integration-runner",
             parent_runner_id=None,
             messages=[{
-                "role": message_row["role"],
-                "content": message_row["content"],
+                "role": stored_content["role"],
+                "content": stored_content["parts"][0]["text"],
             }],
             text="integration response",
             prompt_tokens=8,

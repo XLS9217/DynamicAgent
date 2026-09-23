@@ -19,7 +19,7 @@ class TurnCompletionTest(unittest.IsolatedAsyncioTestCase):
         """A finished frame must permit a new turn without old-task cleanup clobbering it."""
         session = RealtimeSession("test", session_id="completion-test")
         session.agi = AgentGeneralInterface(openai_adapter=object())
-        session.load_messages = AsyncMock(return_value=[])
+        session.load_model_messages = AsyncMock(return_value=[])
         session.append_message = AsyncMock(return_value="trigger-id")
         second_started = asyncio.Event()
         release_second = asyncio.Event()
@@ -91,7 +91,7 @@ class TurnCompletionTest(unittest.IsolatedAsyncioTestCase):
         session.agi._runner._response_handler.invoke = AsyncMock(
             return_value=AgentInvokeResult(full_text="saved answer", tool_calls=[]),
         )
-        session.load_messages = AsyncMock(return_value=[])
+        session.load_model_messages = AsyncMock(return_value=[])
         saved = False
 
         async def append(role, content):

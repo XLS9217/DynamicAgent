@@ -3,6 +3,7 @@ This acts as a final wrapper to user
 """
 import asyncio
 import json
+from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
@@ -285,8 +286,9 @@ class DynamicAgentClient:
         text: str,
         on_chunk: Callable[[AgentResponseChunk], None] = None,
         on_event: Callable[[AgentEvent], None] = None,
+        images: list[str | Path] | None = None,
     ):
-        """Run a turn and return its full or stopped partial response."""
+        """Run a text or image turn and return its full or stopped response."""
         if self._trigger_future is not None and not self._trigger_future.done():
             raise RuntimeError("A turn is already active")
         await self._ensure_connected()
@@ -308,7 +310,19 @@ class DynamicAgentClient:
 
         # Fire HTTP trigger, response streams via WebSocket
         try:
-            await ServiceHandler.trigger(self.session_id, text, trigger_id=self._trigger_id)
+            if images:
+                await ServiceHandler.trigger(
+                    self.session_id,
+                    text,
+                    trigger_id=self._trigger_id,
+                    images=images,
+                )
+            else:
+                await ServiceHandler.trigger(
+                    self.session_id,
+                    text,
+                    trigger_id=self._trigger_id,
+                )
         except BaseException:
             future.cancel()
             raise

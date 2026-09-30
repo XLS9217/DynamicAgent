@@ -4,7 +4,7 @@ This acts as a final wrapper to user
 import asyncio
 import json
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 from uuid import uuid4
 
 import websockets
@@ -26,6 +26,7 @@ class DynamicAgentClient:
 
     def __init__(self):
         self.session_id: str | None = None
+        self.session_type: Literal["chat", "task"] = "task"
         self.runner_id: str | None = None
         self.websocket = None
         self.messages: list = []
@@ -55,19 +56,22 @@ class DynamicAgentClient:
     async def create(
         cls,
         setting: str,
+        session_type: Literal["chat", "task"] = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
     ) -> "DynamicAgentClient":
-        """Create a session with PostgreSQL history and a Redis message cache."""
+        """Create a Redis-only task or durable chat session."""
         instance = cls()
         (
             instance.session_id,
+            instance.session_type,
             instance.runner_id,
             instance.websocket,
             instance.messages,
         ) = await ServiceHandler.create_session(
             setting,
             instance,
+            session_type=session_type,
             reconnect_keep=reconnect_keep,
             session_id=session_id,
         )

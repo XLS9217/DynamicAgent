@@ -22,6 +22,7 @@ class SessionCleanupTest(unittest.IsolatedAsyncioTestCase):
         )
         expired_second = RealtimeSession(
             "test",
+            session_type="chat",
             reconnect_keep=1,
             session_id="expired-second",
         )
@@ -51,10 +52,14 @@ class SessionCleanupTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(RealtimeSessionManager.get(expired_first.session_id))
         self.assertIsNone(RealtimeSessionManager.get(expired_second.session_id))
         self.assertIs(RealtimeSessionManager.get(active.session_id), active)
-        self.assertCountEqual(
-            [call.args[0] for call in delete_cached_messages.await_args_list],
-            [expired_first.session_id, expired_second.session_id],
-        )
+        calls = {
+            (call.args[0], call.args[1], call.kwargs.get("delete_media", False))
+            for call in delete_cached_messages.await_args_list
+        }
+        self.assertEqual(calls, {
+            (expired_first.session_id, "task", True),
+            (expired_second.session_id, "chat", False),
+        })
 
     async def test_cleanup_preserves_session_during_reconnect_window(self):
         reconnecting = RealtimeSession(

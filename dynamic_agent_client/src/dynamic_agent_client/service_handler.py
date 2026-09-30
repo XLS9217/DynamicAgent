@@ -5,6 +5,7 @@ import mimetypes
 import json
 from pathlib import Path
 import re
+from typing import Literal
 
 import httpx
 import websockets
@@ -48,6 +49,7 @@ class ServiceHandler:
         cls,
         setting: str,
         client,
+        session_type: Literal["chat", "task"] = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
     ) -> tuple:
@@ -58,6 +60,7 @@ class ServiceHandler:
             f"{cls._server_addr}/create_session",
             json={
                 "setting": setting,
+                "session_type": session_type,
                 "reconnect_keep": reconnect_keep,
                 "session_id": session_id,
             },
@@ -66,6 +69,7 @@ class ServiceHandler:
         data = resp.json()
 
         session_id = data["session_id"]
+        session_type = data["session_type"]
         runner_id = data["runner_id"]
         socket_url = data["socket_url"]
         messages = data["messages"]
@@ -76,7 +80,7 @@ class ServiceHandler:
         cls._clients[session_id] = client
 
         ws = await websockets.connect(socket_url)
-        return session_id, runner_id, ws, messages
+        return session_id, session_type, runner_id, ws, messages
 
     @classmethod
     async def add_operator(cls, session_id: str, client, operator):

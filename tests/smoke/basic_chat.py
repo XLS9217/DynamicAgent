@@ -20,13 +20,16 @@ async def main():
 
     try:
         port = os.getenv("PORT", "7777")
+        session_type = os.getenv("SMOKE_SESSION_TYPE", "task")
         await DynamicAgentClient.connect(server_addr=f"http://localhost:{port}")
 
         client = await DynamicAgentClient.create(
             setting="You are a concise assistant.",
+            session_type=session_type,
             session_id=session_id,
         )
         print(f"session_id: {client.session_id}")
+        print(f"session_type: {client.session_type}")
         print(f"messages on create: {client.messages}")
         assert client.session_id == session_id
         assert client.messages == [], "fresh smoke session should start empty"
@@ -51,6 +54,7 @@ async def main():
     finally:
         if client is not None:
             await client.close()
+            await DynamicAgentClient.delete_session(session_id)
 
         await ServiceHandler.stop()
 

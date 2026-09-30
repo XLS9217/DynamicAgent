@@ -14,6 +14,7 @@ from dynamic_agent_service.service.media_storage import MediaStorage
 from dynamic_agent_service.service.service_structs import (
     CreateSessionRequest,
     MessageItem,
+    SessionMeta,
     StoredImagePart,
 )
 from dynamic_agent_service.logging.log_interface import LogInterface
@@ -45,12 +46,15 @@ class RealtimeSession:
     def __init__(
         self,
         setting: str,
+        session_type: str = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
     ):
         self.session_id = session_id or str(uuid.uuid4())
+        self.session_type = session_type
         self.setting = setting
         self.reconnect_keep = reconnect_keep
+        self.created_at = time.time()
         self.disconnect_time: float | None = None
         self.client: WebSocket | None = None
         self.agi: AgentGeneralInterface | None = None
@@ -88,17 +92,29 @@ class RealtimeSession:
         return await SessionAccessor.append_message(
             self.session_id,
             content if isinstance(content, MessageItem) else MessageItem.from_text(role, content),
+            self.session_type,
         )
 
     async def load_messages(self) -> list[dict]:
         """Load public history without filesystem paths or encoded image bytes."""
-        messages = await SessionAccessor.load_messages(self.session_id)
+        messages = await SessionAccessor.load_messages(self.session_id, self.session_type)
         return [message.public_message() for message in messages]
 
     async def load_model_messages(self) -> list[dict]:
         """Materialize stored image references for one model turn."""
-        messages = await SessionAccessor.load_messages(self.session_id)
+        messages = await SessionAccessor.load_messages(self.session_id, self.session_type)
         return [await MediaStorage.materialize(message) for message in messages]
+
+    def meta(self) -> SessionMeta:
+        """Return Redis metadata for the current session."""
+        return SessionMeta(
+            session_id=self.session_id,
+            session_type=self.session_type,
+            setting=self.setting,
+            reconnect_keep=self.reconnect_keep,
+            created_at=self.created_at,
+            disconnect_time=self.disconnect_time,
+        )
 
     async def agent_setup(self):
         resource = await OpenAIResourceAccessor.get_active_resource()
@@ -395,12 +411,29 @@ class RealtimeSessionManager:
 
     @classmethod
     async def create(cls, request: CreateSessionRequest) -> RealtimeSession:
+        existing = cls._sessions.get(request.session_id) if request.session_id else None
+        if existing is not None and existing.session_type != request.session_type:
+            raise ValueError("A session ID cannot change session_type")
+        stored_meta = await SessionAccessor.load_meta(request.session_id) if request.session_id else None
+        if stored_meta is not None and stored_meta.session_type != request.session_type:
+            raise ValueError("A session ID cannot change session_type")
+        if (
+            request.session_id
+            and request.session_type == "task"
+            and stored_meta is None
+            and await SessionAccessor.has_persisted_messages(request.session_id)
+        ):
+            raise ValueError("A persisted chat session ID cannot be reused as a task")
         session = RealtimeSession(
             setting=request.setting,
+            session_type=request.session_type,
             reconnect_keep=request.reconnect_keep,
             session_id=request.session_id,
         )
+        if stored_meta is not None:
+            session.created_at = stored_meta.created_at
         cls._sessions[session.session_id] = session
+        await SessionAccessor.save_meta(session.meta())
         cls._ensure_cleanup_task()
         return session
 
@@ -409,9 +442,10 @@ class RealtimeSessionManager:
         return cls._sessions.get(session_id)
 
     @classmethod
-    def mark_disconnected(cls, session: RealtimeSession):
+    async def mark_disconnected(cls, session: RealtimeSession):
         """Mark session as disconnected, starts reconnect_keep countdown."""
         session.disconnect_time = time.time()
+        await SessionAccessor.save_meta(session.meta())
 
     @classmethod
     async def cleanup_expired(cls):
@@ -421,7 +455,12 @@ class RealtimeSessionManager:
             session = cls._sessions.pop(sid, None)
             if session is not None:
                 try:
-                    await SessionAccessor.delete_cached_messages(sid)
+                    await session.stop()
+                    await SessionAccessor.delete_cached_messages(
+                        sid,
+                        session.session_type,
+                        delete_media=session.session_type == "task",
+                    )
                 except Exception:
                     pass
                 LogInterface.release_session(sid)

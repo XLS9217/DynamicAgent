@@ -25,7 +25,12 @@ class SessionStorageCleanupIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 pool = MagicMock()
                 pool.acquire.return_value.__aenter__ = AsyncMock(return_value=connection)
                 pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-                session = RealtimeSession("test", reconnect_keep=1, session_id=session_id)
+                session = RealtimeSession(
+                    "test",
+                    session_type="chat",
+                    reconnect_keep=1,
+                    session_id=session_id,
+                )
                 session.disconnect_time = time.time() - 2
                 try:
                     with (
@@ -38,11 +43,14 @@ class SessionStorageCleanupIntegrationTest(unittest.IsolatedAsyncioTestCase):
                         self.assertIsNone(RealtimeSessionManager.get(session_id))
                         snapshot = await get_session_storage(session_id)
                         self.assertEqual(snapshot.redis_messages, [])
-                        self.assertEqual([m.model_dump() for m in snapshot.postgres_messages], expected)
+                        self.assertEqual(
+                            [message.public_message() for message in snapshot.postgres_messages],
+                            expected,
+                        )
                         self.assertEqual(await session.load_messages(), expected)
                         await assert_session_persisted(session_id, expected)
                 finally:
                     try:
-                        await SessionAccessor.delete_cached_messages(session_id)
+                        await SessionAccessor.delete_cached_messages(session_id, "chat")
                     finally:
                         await transaction.rollback()

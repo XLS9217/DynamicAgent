@@ -153,21 +153,23 @@ images.
    document with relative paths.
 4. Write every image to `MEDIA_DIR/.staging`, flush it, then atomically rename it
    to its final path under `MEDIA_DIR`.
-5. Insert the complete `session_message` row in a PostgreSQL transaction.
-6. If the database transaction fails, remove the files finalized for that
+5. For a chat session, insert the complete `session_message` row in a PostgreSQL
+   transaction. Task sessions skip this step.
+6. If a chat database transaction fails, remove the files finalized for that
    message. A periodic orphan cleanup handles process crashes between steps 4
    and 5.
-7. Append the same message document to
-   `session:{session_id}:messages` in Redis. If this cache write fails, delete
-   the Redis key so the next read rebuilds it from PostgreSQL.
+7. Append the message document to
+   `session:{session_type}:{session_id}:messages` in Redis. A chat cache miss can
+   rebuild from PostgreSQL. A task cache miss has no durable fallback.
 
-The service does not publish a message or start the model call until all files
-and the PostgreSQL row are durable.
+The service does not publish a message or start the model call until its files
+and configured storage writes complete.
 
 ## Read and Model Request Flow
 
-1. Load message documents from Redis. On a cache miss, load ordered JSONB rows
-   from PostgreSQL, validate them, and repopulate Redis.
+1. Load message documents from Redis. On a chat cache miss, load ordered JSONB
+   rows from PostgreSQL, validate them, and repopulate Redis. A task cache miss
+   returns empty history.
 2. Keep stored image blocks as references while the history is in memory.
 3. Immediately before a model invocation, resolve and read each referenced
    file, verify its size and optional hash, and create the provider content

@@ -9,6 +9,7 @@ from dynamic_agent_client.client_struct import AgentResponseChunk
 class CreateSessionRequest(BaseModel):
     # Session
     setting: str
+    session_type: Literal["chat", "task"] = "task"
     reconnect_keep: int = 30
     session_id: Optional[str] = None  # provided to resume an existing session
 
@@ -69,12 +70,13 @@ class TriggerSubagentRequest(BaseModel):
 
 # ===== Redis-backed session state =====
 # Keys:
-#   session:{session_id}:meta      -> SessionMeta (JSON)
-#   session:{session_id}:messages  -> Redis list of MessageItem (JSON)
+#   session:{session_type}:{session_id}:meta      -> SessionMeta (JSON)
+#   session:{session_type}:{session_id}:messages  -> Redis list of MessageItem (JSON)
 
 class SessionMeta(BaseModel):
-    """Core session metadata. Stored at session:{session_id}:meta."""
+    """Core metadata stored at session:{session_type}:{session_id}:meta."""
     session_id: str
+    session_type: Literal["chat", "task"] = "task"
     setting: str
     reconnect_keep: int
     created_at: float  # Unix timestamp

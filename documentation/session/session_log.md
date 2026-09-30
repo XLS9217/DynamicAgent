@@ -5,17 +5,17 @@ Conversation messages and model invocation logs are stored separately and linked
 | Content | Location | Description |
 | --- | --- | --- |
 | Persisted messages | PostgreSQL `session_message` | Message ID, session ID, creation time, and versioned JSONB content |
-| Live message cache | Redis `session:{session_id}:messages` | Ordered JSON messages, each containing `role` and `content` |
+| Live message cache | Redis `session:{session_type}:{session_id}:messages` | Ordered versioned message documents |
 | Model invocation logs | `{CACHE_DIR}/trigger_log/{trigger_id}.jsonl` | One JSON line per completed model call; `CACHE_DIR` defaults to `.cache` |
 
 ## Writes and Associations
 
 1. The SDK generates a `trigger_id` for each `client.trigger()` call. HTTP requests, streamed events, tool results, cancellation, and log filenames share this execution ID. The backend generates it when omitted by a direct HTTP caller.
-2. The user message is written to PostgreSQL and Redis. Its separate `message_id` is recorded in the log context; it does not replace `trigger_id`. Multiple model calls in the same trigger append to the same file.
+2. The user message is written to Redis. Chat sessions also write it to PostgreSQL. Its separate `message_id` is recorded in the log context; it does not replace `trigger_id`. Multiple model calls in the same trigger append to the same file.
 3. Each invocation record contains invocation, trigger, and message IDs, runner and parent-runner IDs, response text, tool calls and results, model resource ID, token usage, and error information.
-4. The final assistant message is written to PostgreSQL and Redis.
+4. The final assistant message follows the same policy: Redis for every session and PostgreSQL for chat sessions.
 
-Association: `trigger_log/{trigger_id}.jsonl -> record.message_id -> session_message.message_id -> session_id`. Without a trigger context, the filename uses the current `invoke_id` instead.
+For chat sessions, the association is `trigger_log/{trigger_id}.jsonl -> record.message_id -> session_message.message_id -> session_id`. Task message IDs identify the execution but have no PostgreSQL row. Without a trigger context, the filename uses the current `invoke_id` instead.
 
 The invocation record itself contains no `session_id`, timestamp, or complete input conversation. Query the PostgreSQL message record to identify the session and trigger time.
 

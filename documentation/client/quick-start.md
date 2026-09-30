@@ -43,6 +43,7 @@ async def main():
     await DynamicAgentClient.connect("http://localhost:7777")
     client = await DynamicAgentClient.create(
         setting="You are a helpful assistant. Reply concisely in English.",
+        session_type="chat",
     )
 
     answer = await client.trigger("My name is Alex. Say hello.")
@@ -58,7 +59,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`trigger()` waits for the turn to finish and returns the response text. Await each turn before starting another on the same session. To receive streaming chunks, pass an `on_chunk` callback to `trigger()`.
+`trigger()` waits for the turn to finish and returns the response text. Await each turn before starting another on the same session. To receive streaming chunks, pass an `on_chunk` callback to `trigger()`. Sessions default to `session_type="task"`, which keeps history only in Redis. Use `session_type="chat"` when history must persist in PostgreSQL.
 
 ## Image Input
 
@@ -72,8 +73,8 @@ answer = await client.trigger(
 )
 ```
 
-The service validates and stores images below `MEDIA_DIR`. PostgreSQL and Redis
-store media references only. Images referenced by the selected session history
+The service validates and stores images below `MEDIA_DIR`. Storage backends keep
+media references only. Images referenced by the selected session history
 are converted to temporary provider content blocks immediately before each
 model turn. PNG, JPEG, WebP, and GIF files are supported. The active model must
 support vision input.
@@ -176,7 +177,8 @@ Use the imports and `asyncio.run(main())` from the Chat example. A Stop button c
 ## Session Lifetime
 
 - `await client.close()` closes the client connection. `reconnect_keep` defaults to 30 seconds; expired session objects and Redis caches are removed by periodic cleanup.
-- User and final assistant messages are always stored in PostgreSQL and cached in Redis. Closing a connection does not delete history or invocation logs.
-- Save `client.session_id` and later pass it to `create(setting=..., session_id=...)` to load message history. Register tools again; previous runtime tasks are not restored.
+- Task sessions are the default and store messages only in Redis. Their messages and media are deleted on expiration.
+- Chat sessions store messages in PostgreSQL and Redis. Closing a connection does not delete their durable history or invocation logs.
+- Save `client.session_id` and later pass it with the same `session_type` to load available history. Register tools again; previous runtime tasks are not restored.
 - To delete messages, save the session ID, close the client, then call `await DynamicAgentClient.delete_session(session_id)` before stopping the shared HTTP client. JSONL logs remain.
 - Call `ServiceHandler.stop()` only when all sessions using the shared HTTP client have finished.

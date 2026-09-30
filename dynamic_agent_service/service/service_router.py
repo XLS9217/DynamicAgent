@@ -22,7 +22,10 @@ router = APIRouter()
 
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
-    session = await RealtimeSessionManager.create(request=body)
+    try:
+        session = await RealtimeSessionManager.create(request=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     await session.agent_setup()
 
     scheme = request.headers.get("x-forwarded-proto", "http")
@@ -32,6 +35,7 @@ async def create_session(body: CreateSessionRequest, request: Request):
     messages = await session.load_messages()
     return {
         "session_id": session.session_id,
+        "session_type": session.session_type,
         "runner_id": session.agi.runner_id,
         "socket_url": socket_url,
         "messages": messages,
@@ -111,7 +115,7 @@ async def agent_session(websocket: WebSocket, session_id: str):
     finally:
         # Only mark disconnected if this websocket is still the active one
         if session.client is websocket:
-            RealtimeSessionManager.mark_disconnected(session)
+            await RealtimeSessionManager.mark_disconnected(session)
             logger.info("WebSocket cleaned up for session %s", session_id)
         else:
             logger.info("WebSocket was replaced for session %s, skipping disconnect", session_id)
@@ -206,6 +210,12 @@ async def delete_session(session_id: str):
     Delete persisted chat messages for a session and remove the live session if present.
     """
     session = RealtimeSessionManager.get(session_id)
+    stored_meta = await SessionAccessor.load_meta(session_id) if session is None else None
+    session_type = session.session_type if session is not None else (
+        stored_meta.session_type if stored_meta is not None else "chat"
+    )
+    if session is not None:
+        await session.stop()
     if session is not None and session.client is not None:
         client = session.client
         session.client = None
@@ -214,7 +224,7 @@ async def delete_session(session_id: str):
         except Exception as e:
             logger.warning("Failed to close websocket for session %s: %s", session_id, e)
     RealtimeSessionManager._sessions.pop(session_id, None)
-    await SessionAccessor.delete_session(session_id)
+    await SessionAccessor.delete_session(session_id, session_type)
     return {"status": "ok", "session_id": session_id}
 
 

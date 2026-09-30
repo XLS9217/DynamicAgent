@@ -1,3 +1,5 @@
+"""Invoke the model, process streamed responses and tool calls, and record invocation logs."""
+
 from contextlib import aclosing
 from typing import Callable
 

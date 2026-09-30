@@ -21,7 +21,7 @@ uv sync
 
 `/sdk/python` is a browser download redirect, not a `uv add` package URL. Use `/sdk/simple` for installation and upgrades.
 
-Use your backend URL in `DynamicAgentClient.connect()` below. Save an example as `chat.py` and run it:
+Use your backend URL in `DynamicAgentChatClient.connect()` below. Save an example as `chat.py` and run it:
 
 ```sh
 uv run python chat.py
@@ -34,16 +34,15 @@ Create a session and call `trigger()` for each turn. The session supplies previo
 ```python
 import asyncio
 
-from dynamic_agent_client import DynamicAgentClient
+from dynamic_agent_client import DynamicAgentChatClient
 from dynamic_agent_client.service_handler import ServiceHandler
 
 
 async def main():
     """Run two conversational turns in the same session."""
-    await DynamicAgentClient.connect("http://localhost:7777")
-    client = await DynamicAgentClient.create(
+    await DynamicAgentChatClient.connect("http://localhost:7777")
+    client = await DynamicAgentChatClient.create(
         setting="You are a helpful assistant. Reply concisely in English.",
-        session_type="chat",
     )
 
     answer = await client.trigger("My name is Alex. Say hello.")
@@ -59,7 +58,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`trigger()` waits for the turn to finish and returns the response text. Await each turn before starting another on the same session. To receive streaming chunks, pass an `on_chunk` callback to `trigger()`. Sessions default to `session_type="task"`, which keeps history only in Redis. Use `session_type="chat"` when history must persist in PostgreSQL.
+`trigger()` waits for the turn to finish and returns the response text. Await each turn before starting another on the same session. To receive streaming chunks, pass an `on_chunk` callback to `trigger()`. `DynamicAgentChatClient` keeps durable history in PostgreSQL and Redis. `DynamicAgentTaskClient` keeps temporary history only in Redis. Both extend `DynamicAgentClient`; its explicit `session_type` argument remains available for compatibility.
 
 ## Image Input
 
@@ -88,7 +87,7 @@ import asyncio
 
 from dynamic_agent_client import (
     AgentOperator,
-    DynamicAgentClient,
+    DynamicAgentTaskClient,
     agent_tool,
     description,
     flow,
@@ -122,8 +121,8 @@ class Calculator(AgentOperator):
 
 async def main():
     """Register a tool and let the agent use it during a turn."""
-    await DynamicAgentClient.connect("http://localhost:7777")
-    client = await DynamicAgentClient.create(
+    await DynamicAgentTaskClient.connect("http://localhost:7777")
+    client = await DynamicAgentTaskClient.create(
         setting="Use the registered calculator for arithmetic. Reply concisely.",
     )
     await client.add_operator(Calculator())
@@ -151,8 +150,8 @@ Run the trigger as a task so a UI action or another coroutine can stop it:
 ```python
 async def main():
     """Stop shortly after text starts, then ask about the partial response."""
-    await DynamicAgentClient.connect("http://localhost:7777")
-    client = await DynamicAgentClient.create(setting="Reply in English.")
+    await DynamicAgentChatClient.connect("http://localhost:7777")
+    client = await DynamicAgentChatClient.create(setting="Reply in English.")
     text_started = asyncio.Event()
 
     def on_chunk(chunk):
@@ -177,8 +176,8 @@ Use the imports and `asyncio.run(main())` from the Chat example. A Stop button c
 ## Session Lifetime
 
 - `await client.close()` closes the client connection. `reconnect_keep` defaults to 30 seconds; expired session objects and Redis caches are removed by periodic cleanup.
-- Task sessions are the default and store messages only in Redis. Their messages and media are deleted on expiration.
+- `DynamicAgentTaskClient` sessions store messages only in Redis. Their messages and media are deleted on expiration.
 - Chat sessions store messages in PostgreSQL and Redis. Closing a connection does not delete their durable history or invocation logs.
-- Save `client.session_id` and later pass it with the same `session_type` to load available history. Register tools again; previous runtime tasks are not restored.
-- To delete messages, save the session ID, close the client, then call `await DynamicAgentClient.delete_session(session_id)` before stopping the shared HTTP client. JSONL logs remain.
+- Save `client.session_id` and later pass it to the same client class to load available history. Register tools again; previous runtime tasks are not restored.
+- To delete messages, save the session ID, close the client, then call `await DynamicAgentChatClient.delete_session(session_id)` or the corresponding task-client method before stopping the shared HTTP client. JSONL logs remain.
 - Call `ServiceHandler.stop()` only when all sessions using the shared HTTP client have finished.

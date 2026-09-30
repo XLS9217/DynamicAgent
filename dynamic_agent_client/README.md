@@ -35,27 +35,29 @@ from dynamic_agent_client import ...
 
 ## Sessions
 
-Sessions write conversation messages to PostgreSQL and cache them in Redis.
-Closing a client disconnects it; expiration removes its runtime state and Redis
-cache while retaining database history and invocation logs.
+Chat sessions write conversation messages to PostgreSQL and cache them in Redis.
+Task sessions keep temporary history only in Redis. Both retain invocation logs.
 
 ```python
-client = await DynamicAgentClient.create("You are a concise assistant.")
+from dynamic_agent_client import DynamicAgentChatClient, DynamicAgentTaskClient
+
+chat = await DynamicAgentChatClient.create("You are a concise assistant.")
+task = await DynamicAgentTaskClient.create("Complete this temporary task.")
 ```
 
 Save the generated session ID and pass it to `create` later to load its
 conversation history. Runtime tasks and registered operators are not restored:
 
 ```python
-await DynamicAgentClient.connect("http://localhost:7777")
+await DynamicAgentChatClient.connect("http://localhost:7777")
 
-client = await DynamicAgentClient.create(
+client = await DynamicAgentChatClient.create(
     "You are a concise assistant.",
 )
 session_id = client.session_id
 await client.close()
 
-client = await DynamicAgentClient.create(
+client = await DynamicAgentChatClient.create(
     "You are a concise assistant.",
     session_id=session_id,
 )
@@ -67,7 +69,7 @@ Operators expose client-side Python functions as tools the agent can call during
 `client.trigger(...)`.
 
 ```python
-from dynamic_agent_client import DynamicAgentClient, AgentOperator, agent_tool, description, flow
+from dynamic_agent_client import DynamicAgentTaskClient, AgentOperator, agent_tool, description, flow
 
 
 class WeatherOperator(AgentOperator):
@@ -87,8 +89,8 @@ class WeatherOperator(AgentOperator):
         return f"{city}: sunny"
 
 
-await DynamicAgentClient.connect("http://localhost:7777")
-client = await DynamicAgentClient.create("You are a concise assistant.")
+await DynamicAgentTaskClient.connect("http://localhost:7777")
+client = await DynamicAgentTaskClient.create("You are a concise assistant.")
 await client.add_operator(WeatherOperator())
 
 answer = await client.trigger("What is the weather in Shanghai?")

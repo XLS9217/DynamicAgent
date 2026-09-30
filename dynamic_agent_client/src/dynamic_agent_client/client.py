@@ -4,7 +4,7 @@ This acts as a final wrapper to user
 import asyncio
 import json
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Literal, Self
 from uuid import uuid4
 
 import websockets
@@ -59,8 +59,24 @@ class DynamicAgentClient:
         session_type: Literal["chat", "task"] = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
-    ) -> "DynamicAgentClient":
+    ) -> Self:
         """Create a Redis-only task or durable chat session."""
+        return await cls._create(
+            setting=setting,
+            session_type=session_type,
+            reconnect_keep=reconnect_keep,
+            session_id=session_id,
+        )
+
+    @classmethod
+    async def _create(
+        cls,
+        setting: str,
+        session_type: Literal["chat", "task"],
+        reconnect_keep: int,
+        session_id: str | None,
+    ) -> Self:
+        """Create the concrete client with an explicit storage policy."""
         instance = cls()
         (
             instance.session_id,

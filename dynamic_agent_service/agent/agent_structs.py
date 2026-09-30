@@ -1,3 +1,5 @@
+"""Define the shared state, tool-call, and invocation-result models used by agents."""
+
 from enum import StrEnum
 
 from pydantic import BaseModel

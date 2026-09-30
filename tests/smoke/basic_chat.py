@@ -8,7 +8,11 @@ from uuid import uuid4
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from dotenv import load_dotenv
-from dynamic_agent_client import AgentResponseChunk, DynamicAgentClient
+from dynamic_agent_client import (
+    AgentResponseChunk,
+    DynamicAgentChatClient,
+    DynamicAgentTaskClient,
+)
 from dynamic_agent_client.service_handler import ServiceHandler
 
 load_dotenv()
@@ -21,11 +25,11 @@ async def main():
     try:
         port = os.getenv("PORT", "7777")
         session_type = os.getenv("SMOKE_SESSION_TYPE", "task")
-        await DynamicAgentClient.connect(server_addr=f"http://localhost:{port}")
+        client_type = DynamicAgentChatClient if session_type == "chat" else DynamicAgentTaskClient
+        await client_type.connect(server_addr=f"http://localhost:{port}")
 
-        client = await DynamicAgentClient.create(
+        client = await client_type.create(
             setting="You are a concise assistant.",
-            session_type=session_type,
             session_id=session_id,
         )
         print(f"session_id: {client.session_id}")
@@ -54,7 +58,7 @@ async def main():
     finally:
         if client is not None:
             await client.close()
-            await DynamicAgentClient.delete_session(session_id)
+            await client.delete_session(session_id)
 
         await ServiceHandler.stop()
 

@@ -1,3 +1,5 @@
+"""Configure the main agent and subagents, expose their tools, and coordinate execution."""
+
 import asyncio
 import uuid
 from typing import Awaitable, Callable

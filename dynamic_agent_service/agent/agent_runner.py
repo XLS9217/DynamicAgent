@@ -1,3 +1,5 @@
+"""Run an agent's model-and-tool loop while tracking lifecycle and streamed output."""
+
 import asyncio
 import json
 from typing import Awaitable, Callable

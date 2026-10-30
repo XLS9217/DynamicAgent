@@ -29,20 +29,21 @@ def _is_local_endpoint(base_url: str) -> bool:
 class OpenAIAdapter:
     """Wrap OpenAI-compatible calls, bypassing proxies for local endpoints."""
 
-    def __init__(self, api_key: str, base_url: str, model: str):
+    def __init__(self, api_key: str, base_url: str, model: str, bypass_proxy: bool = False):
         """
         Initialize an OpenAI-compatible API adapter.
 
         Args:
             api_key: API key for the LLM service
             base_url: Base URL for the LLM API
-            model: Model name to use (default: qwen3-max)
+            model: Model name to use
+            bypass_proxy: Ignore environment proxies for this provider
         """
         self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
-            # Keep SDK transport defaults; bypass environment proxies only for LAN URLs.
-            http_client=DefaultAsyncHttpxClient(trust_env=False) if _is_local_endpoint(base_url) else None,
+            # Bypass proxies for opted-in providers and local endpoints.
+            http_client=DefaultAsyncHttpxClient(trust_env=False) if bypass_proxy or _is_local_endpoint(base_url) else None,
         )
         self.model = model
 

@@ -14,7 +14,6 @@ dependencies = [
     "websocket",
     "asyncpg>=0.31.0",
     "aiofiles>=25.1.0",
-    "pymilvus>=2.6.0",
     "python-multipart>=0.0.20",
 ]
 

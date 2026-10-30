@@ -33,6 +33,7 @@ async def main() -> None:
             api_key=resource.api_key,
             base_url=resource.base_url,
             model=resource.model,
+            bypass_proxy=resource.bypass_proxy,
         )
 
         chunk_count = 0

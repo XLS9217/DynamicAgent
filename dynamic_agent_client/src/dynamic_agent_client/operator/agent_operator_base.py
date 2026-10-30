@@ -1,12 +1,15 @@
 """Script name: agent_operator_base.py. Define async tools and generate their schemas."""
 
 import inspect
+from copy import deepcopy
 import re
 from abc import ABC
 from typing import Callable, get_type_hints
 from logging import getLogger
 
 from pydantic import BaseModel, Field, create_model
+
+from .param_limits import constrained_parameter
 
 logger = getLogger(__name__)
 
@@ -152,7 +155,9 @@ class AgentOperator(ABC):
 
             if hasattr(func, '_agent_tool_schema'):
                 self._tools[name] = {
-                    "schema": func._agent_tool_schema,
+                    "schema": deepcopy(func._agent_tool_schema),
+                    "base_schema": deepcopy(func._agent_tool_schema),
+                    "param_limits": {},
                     "callable": attr,
                     "count_limit": getattr(func, "_agent_tool_count_limit", None),
                 }
@@ -169,12 +174,39 @@ class AgentOperator(ABC):
 
         logger.info(f"Total tools collected: {len(self._tools)}")
 
+    def inject_param_limit(self, tool_name: str, param_name: str, limits: dict) -> None:
+        """Constrain a declared tool parameter for this operator instance."""
+        if tool_name not in self._tools:
+            raise ValueError(f"Unknown tool: {tool_name}")
+        tool = self._tools[tool_name]
+        root = tool["base_schema"]["parameters"]
+        if param_name not in root.get("properties", {}):
+            raise ValueError(f"Unknown parameter: {tool_name}.{param_name}")
+
+        # Combine injections separately from immutable annotation constraints.
+        def merge(previous: dict, incoming: dict) -> dict:
+            """Copy dictionaries recursively and replace scalar or list values."""
+            result = deepcopy(previous)
+            for key, value in incoming.items():
+                result[key] = (merge(result[key], value)
+                               if isinstance(value, dict) and isinstance(result.get(key), dict)
+                               else deepcopy(value))
+            return result
+
+        if not isinstance(limits, dict) or not limits:
+            raise ValueError("Parameter limits must be a nonempty dictionary")
+        merged = merge(tool["param_limits"].get(param_name, {}), limits)
+        parameter = constrained_parameter(root["properties"][param_name], merged, root)
+        # Commit only after validation; rejected injections leave registration unchanged.
+        tool["schema"]["parameters"]["properties"][param_name] = parameter
+        tool["param_limits"][param_name] = merged
+
     def get_serialized_operator(self) -> SerializedOperatorStructure:
         """Serialize this operator into a SerializedOperatorStructure."""
         class_name = self.__class__.__name__
         tools = []
         for t in self._tools.values():
-            schema = dict(t["schema"])
+            schema = deepcopy(t["schema"])
             schema["name"] = f"{class_name}_{schema['name']}"
             tools.append({"type": "function", "function": schema})
 

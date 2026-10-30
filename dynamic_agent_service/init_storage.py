@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS openai_resource (
     model       TEXT NOT NULL,
     api_key     TEXT NOT NULL,
     base_url    TEXT NOT NULL,
+    bypass_proxy BOOLEAN NOT NULL DEFAULT FALSE,
     deleted_at  TIMESTAMPTZ,
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     priority    INTEGER NOT NULL DEFAULT 0,

@@ -1,5 +1,7 @@
 # Remove the Old RAG Feature
 
+> Historical migration record. On 2026-10-30, the remaining KnowledgeEngine and Milvus adapters, mandatory startup initialization, configuration keys, dependency, deployment compose file, and vector integration test were removed from DA. The retention decisions and interfaces below describe the earlier migration, not the current service. Existing external services, collections, and volumes were not deleted. Applications can provide retrieval through their own operators.
+
 Remove the bucket/blueprint retrieval workflow while keeping KnowledgeEngine and Milvus available as reusable embedding and vector database services. The code removal below is implemented. Existing database records, Redis keys, Milvus collections, and volumes have not been deleted.
 
 ## Keep

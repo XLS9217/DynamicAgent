@@ -19,10 +19,10 @@ class OpenAIResourceAccessor:
             row = await conn.fetchrow(
                 """
                 INSERT INTO openai_resource (
-                    resource_id, model, api_key, base_url, enabled, priority
+                    resource_id, model, api_key, base_url, enabled, priority, bypass_proxy
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING resource_id, model, api_key, base_url, deleted_at, enabled, priority
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING resource_id, model, api_key, base_url, deleted_at, enabled, priority, bypass_proxy
                 """,
                 resource_id,
                 resource.model,
@@ -30,6 +30,7 @@ class OpenAIResourceAccessor:
                 resource.base_url,
                 resource.enabled,
                 resource.priority,
+                resource.bypass_proxy,
             )
         return OpenAIResource(**dict(row))
 
@@ -39,7 +40,7 @@ class OpenAIResourceAccessor:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
+                SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority, bypass_proxy
                 FROM openai_resource
                 WHERE resource_id = $1
                 """,
@@ -54,7 +55,7 @@ class OpenAIResourceAccessor:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
+                SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority, bypass_proxy
                 FROM openai_resource
                 WHERE enabled = TRUE AND deleted_at IS NULL
                 ORDER BY priority DESC, resource_id
@@ -70,7 +71,7 @@ class OpenAIResourceAccessor:
             if enabled_only:
                 rows = await conn.fetch(
                     """
-                    SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
+                    SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority, bypass_proxy
                     FROM openai_resource
                     WHERE enabled = TRUE AND deleted_at IS NULL
                     ORDER BY priority DESC, resource_id
@@ -79,7 +80,7 @@ class OpenAIResourceAccessor:
             else:
                 rows = await conn.fetch(
                     """
-                    SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority
+                    SELECT resource_id, model, api_key, base_url, deleted_at, enabled, priority, bypass_proxy
                     FROM openai_resource
                     WHERE deleted_at IS NULL
                     ORDER BY priority DESC, resource_id
@@ -131,9 +132,10 @@ class OpenAIResourceAccessor:
                     api_key = COALESCE($3, api_key),
                     base_url = COALESCE($4, base_url),
                     enabled = COALESCE($5, enabled),
-                    priority = COALESCE($6, priority)
+                    priority = COALESCE($6, priority),
+                    bypass_proxy = COALESCE($7, bypass_proxy)
                 WHERE resource_id = $1 AND deleted_at IS NULL
-                RETURNING resource_id, model, api_key, base_url, deleted_at, enabled, priority
+                RETURNING resource_id, model, api_key, base_url, deleted_at, enabled, priority, bypass_proxy
                 """,
                 resource_id,
                 update.model,
@@ -141,6 +143,7 @@ class OpenAIResourceAccessor:
                 update.base_url,
                 update.enabled,
                 update.priority,
+                update.bypass_proxy,
             )
         return OpenAIResource(**dict(row)) if row is not None else None
 

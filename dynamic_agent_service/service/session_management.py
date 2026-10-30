@@ -126,6 +126,7 @@ class RealtimeSession:
                 api_key=resource.api_key,
                 base_url=resource.base_url,
                 model=resource.model,
+                bypass_proxy=resource.bypass_proxy,
             ),
             setting=self.setting,
             send_tool_calls=self._send_tool_calls,

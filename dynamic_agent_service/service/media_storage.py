@@ -59,7 +59,7 @@ class MediaStorage:
     async def save_uploads(cls, uploads: list[UploadFile]) -> list[StoredImagePart]:
         """Validate uploads and atomically move them into their final paths."""
         maximum = int(os.getenv("MEDIA_MAX_BYTES", str(10 * 1024 * 1024)))
-        if len(uploads) > int(os.getenv("MEDIA_MAX_FILES", "8")):
+        if len(uploads) > int(os.getenv("MEDIA_MAX_FILES", "16")):
             raise ValueError("Too many images in one trigger")
         root = cls.root()
         staging = root / ".staging"

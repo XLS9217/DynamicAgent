@@ -8,6 +8,7 @@ class AgentResponseChunk(BaseModel):
 
     type: Literal["agent_chunk"]
     text: str
+    stream_progress: dict[str, Any] | None = None
     finished: bool = False
     cancelled: bool = False
     trigger_id: str | None = None

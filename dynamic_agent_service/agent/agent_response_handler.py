@@ -73,7 +73,7 @@ class AgentResponseHandler:
                     runner_id=self.runner_id,
                     parent_runner_id=self.parent_runner_id,
                     messages=messages,
-                    error=LogInterface.error(exc),
+                    error={**LogInterface.error(exc), "stream_progress": getattr(self, "_stream_progress", {})},
                 )
             raise
 
@@ -111,6 +111,9 @@ class AgentResponseHandler:
         :param stream_callback: Async callback for content chunks
         :return: AgentInvokeResponse with full text and tool calls
         """
+        import time
+        started = time.monotonic()
+        self._stream_progress = {"phase": "waiting", "chunks": 0, "text_chars": 0, "tool_argument_chars": 0}
         full_response = ""
         tool_calls_dict = {}
         prompt_tokens = 0
@@ -123,6 +126,12 @@ class AgentResponseHandler:
             parallel_tool_calls=self.parallel_tool_calls,
         )) as stream:
             async for chunk in stream:
+                # Count provider activity without exposing generated arguments.
+                progress = self._stream_progress
+                elapsed = round(time.monotonic() - started, 3)
+                progress.setdefault("first_chunk_seconds", elapsed)
+                progress.update(chunks=progress["chunks"] + 1, last_chunk_seconds=elapsed)
+
                 usage = getattr(chunk, "usage", None)
                 if usage is not None:
                     prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
@@ -164,6 +173,15 @@ class AgentResponseHandler:
                                     tool_calls_dict[idx]["name"] = func.name
                                 if hasattr(func, 'arguments') and func.arguments:
                                     tool_calls_dict[idx]["arguments"] += func.arguments
+
+                progress.update(
+                    phase="building_tool_result" if tool_calls_dict else "generating",
+                    text_chars=len(full_response),
+                    tool_argument_chars=sum(len(tc["arguments"]) for tc in tool_calls_dict.values()),
+                )
+                if stream_callback:
+                    await stream_callback(AgentResponseChunk(
+                        type="agent_chunk", text="", stream_progress=dict(progress)))
 
         tool_calls = [
             AgentToolCall(

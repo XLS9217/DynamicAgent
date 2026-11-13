@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "soft_limit": 1600,
+  "hard_limit": 2400,
+  "tool_calls": [
+    "EvidenceOperator_read",
+    "EvidenceOperator_read",
+    "MemoryOperator_compact",
+    "MemoryOperator_compact",
+    "MemoryOperator_list",
+    "MemoryOperator_check"
+  ],
+  "checkpoints": 4,
+  "postgres_reload": true,
+  "recall": "Evidence code: **silver-heron** (confirmed from checkpoint `db5de3b1`)."
+}

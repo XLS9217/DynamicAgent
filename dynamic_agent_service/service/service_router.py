@@ -20,6 +20,31 @@ logger = get_my_logger()
 
 router = APIRouter()
 
+
+class MemoryRequest(BaseModel):
+    """Bind a memory operation to a pending tool call."""
+    session_id: str
+    runner_id: str
+    trigger_id: str
+    tool_call_id: str
+    action: str
+    checkpoint_id: str | None = None
+
+
+@router.post("/memory")
+async def memory(body: MemoryRequest):
+    """Access memory through the active session and tool identity."""
+    if body.action not in {"list", "check", "compact"}:
+        raise HTTPException(status_code=422, detail="Unknown memory action")
+    session = RealtimeSessionManager.get(body.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        return await session.memory(body)
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
     try:

@@ -52,6 +52,8 @@ class ServiceHandler:
         session_type: Literal["chat", "task"] = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
+        soft_limit_count: int = 512_000,
+        hard_limit_count: int = 768_000,
     ) -> tuple:
         """
         POST /create_session to the service, register client, and return session data.
@@ -63,6 +65,8 @@ class ServiceHandler:
                 "session_type": session_type,
                 "reconnect_keep": reconnect_keep,
                 "session_id": session_id,
+                "soft_limit_count": soft_limit_count,
+                "hard_limit_count": hard_limit_count,
             },
         )
         resp.raise_for_status()
@@ -81,6 +85,13 @@ class ServiceHandler:
 
         ws = await websockets.connect(socket_url)
         return session_id, session_type, runner_id, ws, messages
+
+    @classmethod
+    async def memory(cls, **payload):
+        """Request memory using the bound session and active tool identity."""
+        response = await cls._http.post(f"{cls._server_addr}/memory", json=payload)
+        response.raise_for_status()
+        return response.json()
 
     @classmethod
     async def add_operator(cls, session_id: str, client, operator):

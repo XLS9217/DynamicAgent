@@ -21,12 +21,28 @@ CREATE TABLE IF NOT EXISTS session_message (
     create_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     session_id TEXT NOT NULL,
     content    JSONB NOT NULL,
+    sequence_no BIGINT GENERATED ALWAYS AS IDENTITY,
+    UNIQUE (session_id, message_id),
     CONSTRAINT session_message_content_is_object
         CHECK (jsonb_typeof(content) = 'object')
 );
 
+CREATE INDEX IF NOT EXISTS session_message_sequence ON session_message(session_id, sequence_no);
+
 CREATE INDEX IF NOT EXISTS idx_session_message_history
     ON session_message (session_id, create_at, message_id);
+
+CREATE TABLE IF NOT EXISTS session_memory_checkpoint (
+    id UUID PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    summary TEXT NOT NULL CHECK (btrim(summary) <> ''),
+    compacted TEXT NOT NULL CHECK (btrim(compacted) <> ''),
+    last_message_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (session_id, last_message_id),
+    FOREIGN KEY (session_id, last_message_id)
+        REFERENCES session_message (session_id, message_id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS openai_resource (
     resource_id TEXT PRIMARY KEY,

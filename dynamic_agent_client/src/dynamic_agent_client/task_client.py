@@ -18,12 +18,16 @@ class DynamicAgentTaskClient(DynamicAgentClient):
         setting: str,
         reconnect_keep: int = 30,
         session_id: str = None,
+        soft_limit_count: int = 512_000,
+        hard_limit_count: int = 768_000,
     ) -> Self:
         return await super().create(
             setting=setting,
             session_type="task",
             reconnect_keep=reconnect_keep,
             session_id=session_id,
+            soft_limit_count=soft_limit_count,
+            hard_limit_count=hard_limit_count,
         )
 
     async def trigger(

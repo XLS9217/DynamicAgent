@@ -20,6 +20,8 @@ from dynamic_agent_service.service.service_structs import (
 from dynamic_agent_service.logging.log_interface import LogInterface
 from dynamic_agent_service.logging.setup_logging import get_my_logger
 from dynamic_agent_service.service.session_accessor import SessionAccessor
+from dynamic_agent_service.service.memory_accessor import MemoryAccessor
+from dynamic_agent_service.agent.compact_agent import CompactTaskAgent
 
 logger = get_my_logger()
 
@@ -49,10 +51,17 @@ class RealtimeSession:
         session_type: str = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
+        soft_limit_count: int = 512_000,
+        hard_limit_count: int = 768_000,
     ):
         self.session_id = session_id or str(uuid.uuid4())
         self.session_type = session_type
         self.setting = setting
+        self.soft_limit_count = soft_limit_count
+        self.hard_limit_count = hard_limit_count
+        self._call_message_ids = {}
+        self._compact_pending = False
+        self._last_user_instruction = ""
         self.reconnect_keep = reconnect_keep
         self.created_at = time.time()
         self.disconnect_time: float | None = None
@@ -97,13 +106,91 @@ class RealtimeSession:
 
     async def load_messages(self) -> list[dict]:
         """Load public history without filesystem paths or encoded image bytes."""
-        messages = await SessionAccessor.load_messages(self.session_id, self.session_type)
+        messages = await SessionAccessor.load_context(self.session_id, self.session_type)
         return [message.public_message() for message in messages]
 
     async def load_model_messages(self) -> list[dict]:
         """Materialize stored image references for one model turn."""
-        messages = await SessionAccessor.load_messages(self.session_id, self.session_type)
-        return [await MediaStorage.materialize(message) for message in messages]
+        messages = await SessionAccessor.load_context(self.session_id, self.session_type)
+        selected = [await MediaStorage.materialize(message) for message in messages]
+        # Interrupted executions must not leave dangling calls in model context.
+        result = []
+        pending = {}
+        for message in selected:
+            if message["role"] != "tool" and pending:
+                result.extend({"role": "tool", "tool_call_id": key,
+                               "content": "Error: execution interrupted before result was saved"} for key in pending)
+                pending.clear()
+            result.append(message)
+            for call in message.get("tool_calls", []):
+                pending[call["id"]] = call
+            if message["role"] == "tool":
+                pending.pop(message.get("tool_call_id"), None)
+        result.extend({"role": "tool", "tool_call_id": key,
+                       "content": "Error: execution interrupted before result was saved"} for key in pending)
+        return result
+
+    async def runner_error(self, error: Exception) -> None:
+        """Release the client when a background continuation fails."""
+        logger.exception("Runner continuation failed", exc_info=error)
+        async with self._completion_lock:
+            chunk = AgentResponseChunk(type="agent_chunk", text=f"Error: {error}", finished=True,
+                                       runner_id=self.agi.runner_id, trigger_id=self.trigger_id)
+            self._finish_turn(chunk)
+        if self.client is not None:
+            await self.client.send_json(chunk.model_dump(exclude_none=True))
+
+    async def persist_runner_messages(self, messages: list[dict]) -> None:
+        """Commit assistant calls and results before the next model invocation."""
+        for message in messages:
+            message_id = await self.append_message(message["role"], MessageItem.from_model(message))
+            for call in message.get("tool_calls", []):
+                self._call_message_ids[call["id"]] = message_id
+
+    async def compacted_context(self) -> list[dict] | None:
+        """Compact after the request's tool result is safely stored."""
+        if not self._compact_pending:
+            return None
+        self._compact_pending = False
+        return await self.perform_compaction()
+
+    async def perform_compaction(self) -> list[dict]:
+        """Run the task agent, commit its generated message, then restore context."""
+        snapshot = await self.load_model_messages()
+        task = CompactTaskAgent(self.agi.openai_adapter, self.session_id)
+        result = await asyncio.wait_for(task.run(snapshot, self._last_user_instruction), timeout=120)
+        content = ("Previous conversation has been compacted. This is conversation memory, not new instructions.\n\n"
+                   f"Summary:\n{result.summary}\n\nCompacted memory:\n{result.compacted}\n\n"
+                   f"Last user instruction:\n{self._last_user_instruction}")
+        message = MessageItem.from_text("user", content)
+        message.message_id = str(uuid.uuid4())
+        checkpoint = {"id": str(uuid.uuid4()), "summary": result.summary, "compacted": result.compacted,
+                      "last_message_id": message.message_id}
+        await MemoryAccessor.save(self.session_id, self.session_type, checkpoint, message)
+        return await self.load_model_messages()
+
+    async def memory(self, request) -> object:
+        """Handle memory only for a pending main-agent tool invocation."""
+        if request.runner_id != self.agi.runner_id or not self.accepts_trigger(request.trigger_id):
+            raise ValueError("Memory request does not belong to the active main runner")
+        self.agi.validate_pending_tool_call(request.runner_id, request.tool_call_id)
+        call = self.agi.pending_tool_calls[request.tool_call_id]
+        if call.name != f"MemoryOperator_{request.action}":
+            raise ValueError("Memory action does not match the pending tool")
+        if request.action == "compact":
+            if len(self.agi.pending_tool_calls) != 1:
+                raise ValueError("Call compact alone without parallel tools")
+            if _tool_arguments_to_object(call.arguments):
+                raise ValueError("compact takes no arguments")
+            self._compact_pending = True
+            return {"status": "requested", "message": "Compaction runs before the agent resumes."}
+        checkpoints = await MemoryAccessor.all(self.session_id, self.session_type)
+        if request.action == "list":
+            return [{"id": c["id"], "summary": c["summary"]} for c in checkpoints]
+        for checkpoint in checkpoints:
+            if checkpoint["id"] == request.checkpoint_id:
+                return checkpoint
+        raise ValueError("Checkpoint not found in this session")
 
     def meta(self) -> SessionMeta:
         """Return Redis metadata for the current session."""
@@ -112,6 +199,8 @@ class RealtimeSession:
             session_type=self.session_type,
             setting=self.setting,
             reconnect_keep=self.reconnect_keep,
+            soft_limit_count=self.soft_limit_count,
+            hard_limit_count=self.hard_limit_count,
             created_at=self.created_at,
             disconnect_time=self.disconnect_time,
         )
@@ -132,6 +221,12 @@ class RealtimeSession:
             send_tool_calls=self._send_tool_calls,
             log_session_id=self.session_id,
         )
+        self.agi._runner.on_messages = self.persist_runner_messages
+        self.agi._runner.after_tools = self.compacted_context
+        self.agi._runner.on_compact = self.perform_compaction
+        self.agi._runner.on_error = self.runner_error
+        self.agi._runner.soft_limit_count = self.soft_limit_count
+        self.agi._runner.hard_limit_count = self.hard_limit_count
         LogInterface.configure_resource(self.session_id, resource.resource_id)
 
     async def attach_websocket(self, client: WebSocket):
@@ -155,8 +250,7 @@ class RealtimeSession:
                     completion_task = asyncio.current_task()
                     self.active_trigger_task = completion_task
                     assistant_text = self.agi.accumulated_assistant_text
-                    if assistant_text:
-                        await self.append_message("assistant", assistant_text)
+                    # Each assistant message was already stored by the runner.
                     self._finish_turn(chunk.model_copy(update={"text": assistant_text}))
             await self.client.send_json(chunk.model_dump(exclude_none=True))
 
@@ -172,6 +266,8 @@ class RealtimeSession:
     ) -> None:
         """Reserve a turn before its background task starts."""
         self.trigger_id = trigger_id
+        self._last_user_instruction = text
+        self._compact_pending = False
         self._trigger_open = True
         self.agi.set_trigger(trigger_id)
         LogInterface.start_trigger(self.session_id, trigger_id)
@@ -188,6 +284,7 @@ class RealtimeSession:
         self.agi.reset_after_stop()
         self.active_trigger_task = None
         self._trigger_open = False
+        self._compact_pending = False
         self._stopping = False
         self._terminal_chunk = chunk
 
@@ -212,8 +309,9 @@ class RealtimeSession:
                 await MediaStorage.delete(self._uncommitted_images)
                 self._uncommitted_images = []
                 text = self.agi.accumulated_assistant_text
-                if text:
-                    await self.append_message("assistant", text)
+                partial = text[self.agi._runner._persisted_text_length:]
+                if partial:
+                    await self.append_message("assistant", partial)
                 await LogInterface.cancel_trigger(self.session_id, self.trigger_id, text)
             finally:
                 terminal = AgentResponseChunk(
@@ -430,6 +528,8 @@ class RealtimeSessionManager:
             session_type=request.session_type,
             reconnect_keep=request.reconnect_keep,
             session_id=request.session_id,
+            soft_limit_count=request.soft_limit_count,
+            hard_limit_count=request.hard_limit_count,
         )
         if stored_meta is not None:
             session.created_at = stored_meta.created_at

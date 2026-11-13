@@ -45,6 +45,14 @@ class AgentRunner:
         self.trigger_id: str | None = None
         self._invoke_task: asyncio.Task | None = None
         self._continuation_task: asyncio.Task | None = None
+        self.on_messages = None
+        self.on_error = None
+        self.after_tools = None
+        self.soft_limit_count = 512_000
+        self.hard_limit_count = 768_000
+        self._last_total_tokens = 0
+        self._persisted_text_length = 0
+        self.on_compact = None
 
     @property
     def accumulated_assistant_text(self) -> str:
@@ -66,6 +74,7 @@ class AgentRunner:
         self._running_message_list = list(messages)
         self._tools = list(tools or [])
         self._full_assistant_text = ""
+        self._persisted_text_length = 0
 
         await self.invoke()
 
@@ -84,9 +93,23 @@ class AgentRunner:
         if self.state is not AgentState.RUNNING:
             raise RuntimeError(f"Agent is {self.state}")
 
+        # The service runs the separate task agent before a hard-limit invocation.
+        estimated = len(json.dumps(self._running_message_list, ensure_ascii=False).encode("utf-8")) // 3
+        count = max(self._last_total_tokens, estimated)
+        if self.on_compact is not None and count >= self.hard_limit_count:
+            replacement = await self.on_compact()
+            self._running_message_list = [self._running_message_list[0], *replacement]
+            self._last_total_tokens = 0
+            count = len(json.dumps(self._running_message_list, ensure_ascii=False).encode("utf-8")) // 3
+            if count >= self.hard_limit_count:
+                raise RuntimeError("Compacted context still exceeds the hard limit")
+        messages = list(self._running_message_list)
+        if self.on_compact is not None and count >= self.soft_limit_count:
+            messages[0] = {**messages[0], "content": messages[0]["content"] +
+                          "\nContext soft limit reached. Consider calling MemoryOperator_compact()."}
         previous_text = self._full_assistant_text
         invoke_response = await self._response_handler.invoke(
-            messages=self._running_message_list,
+            messages=messages,
             tools=self._tools,
             stream_callback=self._handle_response_chunk,
         )
@@ -94,6 +117,13 @@ class AgentRunner:
         # Reconcile final text without duplicating the chunks already collected.
         self._full_assistant_text = previous_text + (invoke_response.full_text or "")
 
+        self._last_total_tokens = getattr(invoke_response, "total_tokens", 0) or 0
+        assistant = self._build_assistant_tool_call_message(invoke_response) if invoke_response.tool_calls else {
+            "role": "assistant", "content": invoke_response.full_text or "",
+        }
+        if self.on_messages is not None:
+            await self.on_messages([assistant])
+        self._persisted_text_length = len(self._full_assistant_text)
         finished = not invoke_response.tool_calls
         if finished:
             # Keep the completed text available to the session's persistence callback.
@@ -151,7 +181,16 @@ class AgentRunner:
 
         if self._all_tool_results_received():
             if self._continuation_task is None or self._continuation_task.done():
-                self._continuation_task = asyncio.create_task(self._complete_tool_results_and_invoke())
+                self._continuation_task = asyncio.create_task(self._continue_safely())
+
+    async def _continue_safely(self) -> None:
+        """Report continuation failures instead of leaving the trigger pending."""
+        try:
+            await self._complete_tool_results_and_invoke()
+        except Exception as exc:
+            if self.on_error is None:
+                raise
+            await self.on_error(exc)
 
     def execution_tasks(self) -> set[asyncio.Task]:
         """Return owned tasks that must finish cancellation before runner reuse."""
@@ -180,7 +219,14 @@ class AgentRunner:
             }
             for tool_call in self.pending_tool_calls.values()
         ]
+        if self.on_messages is not None:
+            await self.on_messages(tool_messages)
         self._running_message_list.extend(tool_messages)
+        if self.after_tools is not None:
+            replacement = await self.after_tools()
+            if replacement is not None:
+                self._running_message_list = [self._running_message_list[0], *replacement]
+                self._last_total_tokens = 0
         self._clear_tool_state()
         self.state = AgentState.RUNNING
         await self.invoke()

@@ -32,7 +32,8 @@ class SessionAccessor:
         session_type: str,
     ) -> str:
         """Append a message to Redis and persist chat messages in PostgreSQL."""
-        message_id = str(uuid.uuid4())
+        message_id = item.message_id or str(uuid.uuid4())
+        item = item.model_copy(update={"message_id": message_id})
         if session_type == "chat":
             pool = PgInstance.get_pool()
             async with pool.acquire() as conn:
@@ -45,7 +46,14 @@ class SessionAccessor:
                 )
 
         redis = RedisInstance.get_client()
-        await redis.rpush(_messages_key(session_id, session_type), item.model_dump_json())
+        try:
+            key = _messages_key(session_id, session_type)
+            if session_type == "task" or await redis.exists(key):
+                await redis.rpush(key, item.model_dump_json())
+        except Exception:
+            if session_type == "chat":
+                await redis.delete(_messages_key(session_id, session_type))
+            raise
         return message_id
 
     @staticmethod
@@ -71,14 +79,45 @@ class SessionAccessor:
         pool = PgInstance.get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT content FROM session_message WHERE session_id = $1 ORDER BY create_at, message_id",
+                "SELECT message_id, content FROM session_message WHERE session_id = $1 ORDER BY sequence_no",
                 session_id,
             )
-        messages = [SessionAccessor._parse_content(row["content"]) for row in rows]
+        messages = [SessionAccessor._parse_content(row["content"]).model_copy(update={"message_id": str(row["message_id"])}) for row in rows]
 
         if messages:
             await redis.rpush(key, *[m.model_dump_json() for m in messages])
 
+        return messages
+
+    @staticmethod
+    async def load_context(session_id: str, session_type: str) -> list[MessageItem]:
+        """Read history starting at the latest compact call, inclusive."""
+        if session_type == "chat":
+            async with PgInstance.get_pool().acquire() as conn:
+                rows = await conn.fetch("""
+                    SELECT m.message_id, m.content
+                    FROM session_message m
+                    WHERE m.session_id = $1
+                      AND m.sequence_no >= COALESCE((
+                          SELECT MAX(boundary.sequence_no)
+                          FROM session_memory_checkpoint c
+                          JOIN session_message boundary
+                            ON boundary.session_id = c.session_id
+                           AND boundary.message_id = c.last_message_id
+                          WHERE c.session_id = $1
+                      ), 0)
+                    ORDER BY m.sequence_no
+                """, session_id)
+            return [SessionAccessor._parse_content(row["content"]).model_copy(
+                update={"message_id": str(row["message_id"])}) for row in rows]
+
+        # Task history is Redis-only; checkpoint hash keys are boundary message IDs.
+        messages = await SessionAccessor.load_messages(session_id, session_type)
+        keys = await RedisInstance.get_client().hkeys(f"session:{session_type}:{session_id}:memory")
+        boundaries = {key.decode() if isinstance(key, bytes) else key for key in keys}
+        for index in range(len(messages) - 1, -1, -1):
+            if messages[index].message_id in boundaries:
+                return messages[index:]
         return messages
 
     @staticmethod
@@ -93,7 +132,7 @@ class SessionAccessor:
         raw_list = await redis.lrange(key, 0, -1) if delete_media else []
         if delete_media:
             await MediaStorage.delete(SessionAccessor._images_from_values(raw_list))
-        keys = [key, _meta_key(session_id, session_type)]
+        keys = [key, _meta_key(session_id, session_type), f"session:{session_type}:{session_id}:memory"]
         if session_type == "chat":
             keys.append(_legacy_messages_key(session_id))
         await redis.delete(*keys)

@@ -11,6 +11,16 @@ class CreateSessionRequest(BaseModel):
     setting: str
     session_type: Literal["chat", "task"] = "task"
     reconnect_keep: int = 30
+    soft_limit_count: int = Field(default=512_000, gt=0)
+    hard_limit_count: int = Field(default=768_000, gt=0, validate_default=True)
+
+    @field_validator("hard_limit_count")
+    @classmethod
+    def validate_limits(cls, value, info):
+        """Require room between soft and hard limits."""
+        if value <= info.data.get("soft_limit_count", 512_000):
+            raise ValueError("hard_limit_count must exceed soft_limit_count")
+        return value
     session_id: Optional[str] = None  # provided to resume an existing session
 
 
@@ -79,6 +89,8 @@ class SessionMeta(BaseModel):
     session_type: Literal["chat", "task"] = "task"
     setting: str
     reconnect_keep: int
+    soft_limit_count: int = 512_000
+    hard_limit_count: int = 768_000
     created_at: float  # Unix timestamp
     disconnect_time: Optional[float] = None  # set when WebSocket disconnects
 
@@ -111,6 +123,21 @@ class MessageItem(BaseModel):
     version: Literal[1] = 1
     role: Literal["system", "user", "assistant", "tool"]
     parts: list[MessagePart] = Field(min_length=1)
+    message_id: str | None = None
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
+
+    @classmethod
+    def from_model(cls, message: dict) -> "MessageItem":
+        """Store one assistant or tool message without losing call identity."""
+        return cls(role=message["role"], parts=[TextPart(text=message.get("content") or "")],
+                   tool_calls=message.get("tool_calls"), tool_call_id=message.get("tool_call_id"))
+
+    def tool_fields(self) -> dict:
+        """Return provider fields only when present."""
+        return {key: value for key, value in {
+            "tool_calls": self.tool_calls, "tool_call_id": self.tool_call_id,
+        }.items() if value is not None}
 
     @classmethod
     def from_text(cls, role: str, text: str) -> "MessageItem":
@@ -135,7 +162,7 @@ class MessageItem(BaseModel):
     def public_message(self) -> dict:
         """Return history without exposing server filesystem paths or hashes."""
         if len(self.parts) == 1 and isinstance(self.parts[0], TextPart):
-            return {"role": self.role, "content": self.parts[0].text}
+            return {"role": self.role, "content": self.parts[0].text, **self.tool_fields()}
         content = []
         for part in self.parts:
             if isinstance(part, TextPart):

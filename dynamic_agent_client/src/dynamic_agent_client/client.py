@@ -59,6 +59,8 @@ class DynamicAgentClient:
         session_type: Literal["chat", "task"] = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
+        soft_limit_count: int = 512_000,
+        hard_limit_count: int = 768_000,
     ) -> Self:
         """Create a Redis-only task or durable chat session."""
         return await cls._create(
@@ -66,6 +68,8 @@ class DynamicAgentClient:
             session_type=session_type,
             reconnect_keep=reconnect_keep,
             session_id=session_id,
+            soft_limit_count=soft_limit_count,
+            hard_limit_count=hard_limit_count,
         )
 
     @classmethod
@@ -75,6 +79,8 @@ class DynamicAgentClient:
         session_type: Literal["chat", "task"],
         reconnect_keep: int,
         session_id: str | None,
+        soft_limit_count: int = 512_000,
+        hard_limit_count: int = 768_000,
     ) -> Self:
         """Create the concrete client with an explicit storage policy."""
         instance = cls()
@@ -90,8 +96,12 @@ class DynamicAgentClient:
             session_type=session_type,
             reconnect_keep=reconnect_keep,
             session_id=session_id,
+            soft_limit_count=soft_limit_count,
+            hard_limit_count=hard_limit_count,
         )
         instance._listen_task = asyncio.ensure_future(instance._listen())
+        from .operator.memory_operator import MemoryOperator
+        await instance.add_operator(MemoryOperator())
         return instance
 
     async def _listen(self):

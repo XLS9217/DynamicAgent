@@ -118,7 +118,7 @@ class MediaStorage:
     async def materialize(cls, message: MessageItem) -> dict:
         """Convert stored references into OpenAI-compatible content blocks."""
         if len(message.parts) == 1 and isinstance(message.parts[0], TextPart):
-            return {"role": message.role, "content": message.parts[0].text}
+            return {"role": message.role, "content": message.parts[0].text, **message.tool_fields()}
         content = []
         for part in message.parts:
             if isinstance(part, TextPart):

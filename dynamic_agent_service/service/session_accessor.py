@@ -125,6 +125,7 @@ class SessionAccessor:
         session_id: str,
         session_type: str,
         delete_media: bool = False,
+        keep_meta: bool = False,
     ) -> None:
         """Delete Redis state and optionally its referenced media files."""
         redis = RedisInstance.get_client()
@@ -132,7 +133,9 @@ class SessionAccessor:
         raw_list = await redis.lrange(key, 0, -1) if delete_media else []
         if delete_media:
             await MediaStorage.delete(SessionAccessor._images_from_values(raw_list))
-        keys = [key, _meta_key(session_id, session_type), f"session:{session_type}:{session_id}:memory"]
+        keys = [key, f"session:{session_type}:{session_id}:memory"]
+        if not keep_meta:
+            keys.append(_meta_key(session_id, session_type))
         if session_type == "chat":
             keys.append(_legacy_messages_key(session_id))
         await redis.delete(*keys)

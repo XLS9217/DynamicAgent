@@ -19,6 +19,7 @@ from .client_struct import (
     service_to_client_message_adapter,
 )
 from .operator.agent_operator_base import AgentOperator
+from .operator.memory_operator import MemoryOperator
 from .service_handler import ServiceHandler
 
 
@@ -61,6 +62,7 @@ class DynamicAgentClient:
         session_id: str = None,
         soft_limit_count: int = 512_000,
         hard_limit_count: int = 768_000,
+        compact_prompt: str | None = None,
     ) -> Self:
         """Create a Redis-only task or durable chat session."""
         return await cls._create(
@@ -70,6 +72,7 @@ class DynamicAgentClient:
             session_id=session_id,
             soft_limit_count=soft_limit_count,
             hard_limit_count=hard_limit_count,
+            compact_prompt=compact_prompt,
         )
 
     @classmethod
@@ -81,6 +84,7 @@ class DynamicAgentClient:
         session_id: str | None,
         soft_limit_count: int = 512_000,
         hard_limit_count: int = 768_000,
+        compact_prompt: str | None = None,
     ) -> Self:
         """Create the concrete client with an explicit storage policy."""
         instance = cls()
@@ -98,10 +102,11 @@ class DynamicAgentClient:
             session_id=session_id,
             soft_limit_count=soft_limit_count,
             hard_limit_count=hard_limit_count,
+            compact_prompt=compact_prompt,
         )
         instance._listen_task = asyncio.ensure_future(instance._listen())
-        from .operator.memory_operator import MemoryOperator
-        await instance.add_operator(MemoryOperator())
+        if instance.session_type == "chat":
+            await instance.add_operator(MemoryOperator())
         return instance
 
     async def _listen(self):

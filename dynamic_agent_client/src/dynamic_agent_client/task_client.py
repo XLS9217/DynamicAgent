@@ -20,6 +20,7 @@ class DynamicAgentTaskClient(DynamicAgentClient):
         session_id: str = None,
         soft_limit_count: int = 512_000,
         hard_limit_count: int = 768_000,
+        compact_prompt: str | None = None,
     ) -> Self:
         return await super().create(
             setting=setting,
@@ -28,6 +29,7 @@ class DynamicAgentTaskClient(DynamicAgentClient):
             session_id=session_id,
             soft_limit_count=soft_limit_count,
             hard_limit_count=hard_limit_count,
+            compact_prompt=compact_prompt,
         )
 
     async def trigger(

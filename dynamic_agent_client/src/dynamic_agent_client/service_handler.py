@@ -1,5 +1,7 @@
 """Script name: service_handler.py. Share backend HTTP access and register session clients."""
 import asyncio
+import hashlib
+import hmac
 from contextlib import ExitStack
 import mimetypes
 import json
@@ -54,6 +56,7 @@ class ServiceHandler:
         session_id: str = None,
         soft_limit_count: int = 512_000,
         hard_limit_count: int = 768_000,
+        compact_prompt: str | None = None,
     ) -> tuple:
         """
         POST /create_session to the service, register client, and return session data.
@@ -67,6 +70,7 @@ class ServiceHandler:
                 "session_id": session_id,
                 "soft_limit_count": soft_limit_count,
                 "hard_limit_count": hard_limit_count,
+                **({"compact_prompt": compact_prompt} if compact_prompt is not None else {}),
             },
         )
         resp.raise_for_status()
@@ -85,6 +89,17 @@ class ServiceHandler:
 
         ws = await websockets.connect(socket_url)
         return session_id, session_type, runner_id, ws, messages
+
+    @classmethod
+    async def chat_history(cls, session_id: str, *, history_secret: str, offset: int = 0, limit: int = 50):
+        """Fetch authorized chat context without connecting its WebSocket."""
+        token = hmac.new(history_secret.encode(), session_id.encode(), hashlib.sha256).hexdigest()
+        response = await cls._http.get(
+            f"{cls._server_addr}/sessions/{session_id}/messages",
+            params={"offset": offset, "limit": limit},
+            headers={"X-DA-History-Token": token}, timeout=30)
+        response.raise_for_status()
+        return response.json()
 
     @classmethod
     async def memory(cls, **payload):

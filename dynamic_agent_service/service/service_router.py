@@ -1,7 +1,10 @@
 import asyncio
-from uuid import uuid4
+import hashlib
+import hmac
+import os
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, WebSocket
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile, WebSocket
 from pydantic import BaseModel, Field
 
 from dynamic_agent_service.service.session_management import RealtimeSessionManager
@@ -65,6 +68,30 @@ async def create_session(body: CreateSessionRequest, request: Request):
         "socket_url": socket_url,
         "messages": messages,
     }
+
+
+@router.get("/sessions/{session_id}/messages")
+async def session_messages(session_id: UUID, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+                           history_token: str = Header(default="", alias="X-DA-History-Token")):
+    """Read chat context using a server-issued session-bound authorization token."""
+    secret = os.environ.get("DA_HISTORY_SECRET")
+    if not secret:
+        raise HTTPException(status_code=503, detail="History authorization is not configured")
+    identity = str(session_id)
+    expected = hmac.new(secret.encode(), identity.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(history_token, expected):
+        raise HTTPException(status_code=403, detail="History access denied")
+    meta = await SessionAccessor.load_meta(identity)
+    if meta is not None and meta.session_type != "chat":
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    if meta is None and not await SessionAccessor.has_persisted_messages(identity):
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    messages = await SessionAccessor.load_context(identity, "chat")
+    return {"session_id": identity, "scope": "current_context",
+            "system_prompt": meta.setting if meta else None,
+            "items": [item.public_message() for item in messages[offset:offset + limit]],
+            "total": len(messages),
+            "next_offset": offset + limit if offset + limit < len(messages) else None}
 
 
 @router.post("/tool_result")

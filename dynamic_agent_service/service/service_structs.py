@@ -11,6 +11,7 @@ class CreateSessionRequest(BaseModel):
     setting: str
     session_type: Literal["chat", "task"] = "task"
     reconnect_keep: int = 30
+    compact_prompt: str | None = Field(default=None, min_length=1)
     soft_limit_count: int = Field(default=512_000, gt=0)
     hard_limit_count: int = Field(default=768_000, gt=0, validate_default=True)
 
@@ -89,6 +90,7 @@ class SessionMeta(BaseModel):
     session_type: Literal["chat", "task"] = "task"
     setting: str
     reconnect_keep: int
+    compact_prompt: str | None = None
     soft_limit_count: int = 512_000
     hard_limit_count: int = 768_000
     created_at: float  # Unix timestamp

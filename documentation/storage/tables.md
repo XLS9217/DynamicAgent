@@ -82,24 +82,28 @@ and `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`. Both text fields must be no
 The unique `(session_id, last_message_id)` makes repeated saves idempotent; its composite
 foreign key references `session_message(session_id, message_id)` with ON DELETE CASCADE.
 
-The boundary is the assistant message containing the compact tool call, **inclusive**.
-Restored model context starts at the newest checkpoint's call, retains its tool result
-and subsequent messages, and gets the current system prompt. The agent-authored
-compacted text remains in the call arguments. Ordinary calls and results now persist
-across triggers. Interrupted unmatched calls receive explicit error results when
-materializing model history; original history is not rewritten.
+The boundary is the generated compacted **user message**, inclusive. Restored model
+context contains the current system prompt, the newest compacted user message, and
+subsequent messages. Original PostgreSQL messages remain stored. Ordinary tool calls
+and results persist across chat triggers.
 
-The client automatically registers MemoryOperator: compact(summary, compacted), list(),
-and check(checkpoint_id). Tools use the active session/runner/trigger/call identity.
-No separate summarizer model or system prompt is used. Chat checkpoints live in PostgreSQL;
-task checkpoints use a session-scoped Redis hash and expire with the task session.
+Chat clients register MemoryOperator with compact(), list(), and check(checkpoint_id).
+compact() has no arguments: a separate compact task agent generates summary and
+compacted detail using its output operator. A hard limit invokes this compaction
+path directly; it does not force the main agent to choose a tool. User compact
+settings are appended to the default compact prompt. Task clients do not register
+the memory operator. The existing service also contains Redis checkpoint storage.
 
-Existing installations must apply `migrations/memory_history.sql` before deploying this
-version. Fresh installations use `python -m dynamic_agent_service.init_storage`.
-The migration was exercised in a temporary schema; this change does not migrate or
-restart a running deployment. Defaults are 512,000 / 768,000 tokens. Latest reported
-usage plus an approximate pre-call message-size check controls advisory soft prompting
-and forced compact tool choice at the hard limit. This estimate is not an exact tokenizer.
+Existing installations use migrations/memory_history.sql; fresh installations use
+python -m dynamic_agent_service.init_storage. On 2026-11-17 the existing migration
+was applied to the live public schema in dynamic_agent_service. All 723 pre-existing
+message rows were verified unchanged; sequence_no was backfilled and the separate
+session_memory_checkpoint table created. The table_wiki_lab schema is isolated
+experiment storage and is not the downstream service's default schema.
+
+Defaults are 512,000 / 768,000 tokens. Latest reported usage plus an approximate
+pre-call message-size check controls the soft prompt and direct hard-limit
+compaction. The estimate is not an exact tokenizer.
 
 Run the isolated real-model smoke test with `python tests/smoke/memory.py` from the DA
 root using its environment. It uses limits 1,600 / 2,400, a unique session, an ephemeral

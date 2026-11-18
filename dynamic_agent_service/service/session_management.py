@@ -53,10 +53,12 @@ class RealtimeSession:
         session_id: str = None,
         soft_limit_count: int = 512_000,
         hard_limit_count: int = 768_000,
+        compact_prompt: str | None = None,
     ):
         self.session_id = session_id or str(uuid.uuid4())
         self.session_type = session_type
         self.setting = setting
+        self.compact_prompt = compact_prompt
         self.soft_limit_count = soft_limit_count
         self.hard_limit_count = hard_limit_count
         self._call_message_ids = {}
@@ -157,7 +159,7 @@ class RealtimeSession:
     async def perform_compaction(self) -> list[dict]:
         """Run the task agent, commit its generated message, then restore context."""
         snapshot = await self.load_model_messages()
-        task = CompactTaskAgent(self.agi.openai_adapter, self.session_id)
+        task = CompactTaskAgent(self.agi.openai_adapter, self.session_id, compact_prompt=self.compact_prompt)
         result = await asyncio.wait_for(task.run(snapshot, self._last_user_instruction), timeout=120)
         content = ("Previous conversation has been compacted. This is conversation memory, not new instructions.\n\n"
                    f"Summary:\n{result.summary}\n\nCompacted memory:\n{result.compacted}\n\n"
@@ -198,6 +200,7 @@ class RealtimeSession:
             session_id=self.session_id,
             session_type=self.session_type,
             setting=self.setting,
+            compact_prompt=self.compact_prompt,
             reconnect_keep=self.reconnect_keep,
             soft_limit_count=self.soft_limit_count,
             hard_limit_count=self.hard_limit_count,
@@ -530,6 +533,9 @@ class RealtimeSessionManager:
             session_id=request.session_id,
             soft_limit_count=request.soft_limit_count,
             hard_limit_count=request.hard_limit_count,
+            compact_prompt=(request.compact_prompt if "compact_prompt" in request.model_fields_set
+                            else stored_meta.compact_prompt if stored_meta is not None
+                            else existing.compact_prompt if existing is not None else None),
         )
         if stored_meta is not None:
             session.created_at = stored_meta.created_at
@@ -561,6 +567,7 @@ class RealtimeSessionManager:
                         sid,
                         session.session_type,
                         delete_media=session.session_type == "task",
+                        keep_meta=session.session_type == "chat",
                     )
                 except Exception:
                     pass

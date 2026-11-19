@@ -7,7 +7,7 @@ import mimetypes
 import json
 from pathlib import Path
 import re
-from typing import Literal
+from .session_struct import CreateSessionRequest
 
 import httpx
 import websockets
@@ -47,31 +47,11 @@ class ServiceHandler:
             cls._http = _make_httpx_client()
 
     @classmethod
-    async def create_session(
-        cls,
-        setting: str,
-        client,
-        session_type: Literal["chat", "task"] = "task",
-        reconnect_keep: int = 30,
-        session_id: str = None,
-        soft_limit_count: int = 512_000,
-        hard_limit_count: int = 768_000,
-        compact_prompt: str | None = None,
-    ) -> tuple:
-        """
-        POST /create_session to the service, register client, and return session data.
-        """
+    async def create_session(cls, request: CreateSessionRequest, client) -> tuple:
+        """Send the concrete session request and open its WebSocket."""
         resp = await cls._http.post(
             f"{cls._server_addr}/create_session",
-            json={
-                "setting": setting,
-                "session_type": session_type,
-                "reconnect_keep": reconnect_keep,
-                "session_id": session_id,
-                "soft_limit_count": soft_limit_count,
-                "hard_limit_count": hard_limit_count,
-                **({"compact_prompt": compact_prompt} if compact_prompt is not None else {}),
-            },
+            json=request.model_dump(exclude_none=True),
         )
         resp.raise_for_status()
         data = resp.json()

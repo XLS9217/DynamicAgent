@@ -20,9 +20,9 @@ Constraints and indexes:
 
 - `INDEX idx_session_message_history (session_id, create_at, message_id)` supports deterministic history queries by session and time.
 - `session_id` has no foreign key; no session master table exists. Message structure is validated by the application model.
-- Chat messages are written to PostgreSQL first, then Redis. Task messages are written only to Redis.
-- On a chat cache miss, history is loaded in `sequence_no` order and copied into Redis. A task cache miss returns empty history.
-- Chat expiration clears Redis and retains PostgreSQL history. Task expiration clears Redis and deletes referenced media. Explicit deletion removes all storage owned by either type.
+- Chat messages are written to PostgreSQL first, then Redis. Task messages and their image references live in the service process.
+- On a chat cache miss, history is loaded in `sequence_no` order and copied into Redis.
+- Chat expiration clears cached messages and retains chat metadata and PostgreSQL history. Task expiration releases the in-memory messages and deletes their Redis image keys. Explicit deletion removes all storage owned by either type.
 
 ## Model Service Resources (PostgreSQL)
 
@@ -52,9 +52,9 @@ Constraints and indexes:
 
 ## Session Cache (Redis)
 
-### `session:{session_type}:{session_id}:messages`
+### `chat:{session_id}:messages`
 
-One List per session. Each element is a JSON message containing live conversation data or cached persisted history. `session_type` is `chat` or `task`.
+One List per cached chat. Each element is a JSON message from the persisted history.
 
 | Field | Type | Constraints | Description |
 | --- | --- | --- | --- |
@@ -65,11 +65,26 @@ Constraints and indexes:
 
 - Append with `RPUSH` and read with `LRANGE 0 -1`. There are no relational primary keys, foreign keys, or secondary indexes.
 - New list entries include message_id and optional tool_calls/tool_call_id; legacy entries remain readable.
-- Writes set no TTL. Chat expiration removes the cache while retaining PostgreSQL messages. Task expiration removes the list and referenced media.
+- Writes set no TTL. Chat expiration removes the cache while retaining PostgreSQL messages.
 
-### `session:{session_type}:{session_id}:meta`
+### `chat:{session_id}:meta`
 
-One String containing a JSON `SessionMeta` document. It records the session ID, type, setting, reconnect window, creation time, and disconnect time. It prevents a session ID from changing storage policy while metadata exists.
+One String per chat containing a JSON `SessionMeta` document. It records the session ID, type, setting, reconnect window, creation time, and disconnect time. It prevents a session ID from changing storage policy while metadata exists.
+
+### `task:{session_id}:image:{media_id}`
+
+One Redis String per uploaded image. The task message list lives in process memory.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `session_id` | String | Identifies the owning task in the Redis key. |
+| `media_id` | UUID v4 | Generated at upload and used as the final segment of the key. |
+| `image_path` | String | Full Redis key stored in the in-memory message’s image part. |
+| Redis value | Binary string | Original image bytes. DA reads them with `GET image_path` and base64-encodes them when building model input. |
+
+- Upload sets the value and its expiry in one `SET ... EX` operation. The TTL is `max(300, reconnect_keep + 60)` seconds.
+- The service refreshes image TTLs about once a minute while the session is retained. Expiry or explicit session deletion removes the keys.
+- After a service restart, task history is lost and any remaining image keys expire automatically.
 
 Invocation logs are stored in files. The client has no independent database tables.
 
@@ -92,7 +107,7 @@ compact() has no arguments: a separate compact task agent generates summary and
 compacted detail using its output operator. A hard limit invokes this compaction
 path directly; it does not force the main agent to choose a tool. User compact
 settings are appended to the default compact prompt. Task clients do not register
-the memory operator. The existing service also contains Redis checkpoint storage.
+the memory operator. Task sessions keep no memory checkpoints.
 
 Existing installations use migrations/memory_history.sql; fresh installations use
 python -m dynamic_agent_service.init_storage. On 2026-11-17 the existing migration

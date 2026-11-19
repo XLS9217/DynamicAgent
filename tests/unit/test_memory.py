@@ -5,8 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from dynamic_agent_client.operator import MemoryOperator
 from dynamic_agent_service.agent.agent_runner import AgentRunner
-from dynamic_agent_service.service.service_structs import MessageItem, CreateSessionRequest
-from dynamic_agent_service.service.session_management import RealtimeSession
+from dynamic_agent_service.service.service_structs import MessageItem
+from dynamic_agent_client.session_struct import ChatSessionRequest, TaskSessionRequest
+from dynamic_agent_service.service.session_management import AgentSessionBase, ChatAgentSession, SessionManager, TaskAgentSession
 from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.service.memory_accessor import MemoryAccessor
 from dynamic_agent_service.service.media_storage import MediaStorage
@@ -15,13 +16,75 @@ from dynamic_agent_service.service.media_storage import MediaStorage
 class MemoryTests(unittest.IsolatedAsyncioTestCase):
     """Exercise schema, session scope and context without external services."""
 
+    async def test_session_factory_and_expiration_policies(self):
+        """Select the concrete session and release only its temporary storage."""
+        with self.assertRaises(TypeError):
+            AgentSessionBase("test")
+        with (
+            patch.object(SessionManager, "_sessions", {}),
+            patch.object(SessionManager, "_ensure_cleanup_task"),
+            patch.object(SessionAccessor, "save_meta", new_callable=AsyncMock),
+            patch.object(SessionAccessor, "delete_cached_messages", new_callable=AsyncMock) as delete,
+        ):
+            task = await SessionManager.create(TaskSessionRequest(setting="test"))
+            self.assertIsInstance(task, TaskAgentSession)
+            self.assertFalse(hasattr(task, "perform_compaction"))
+            await task.append_message("user", "first turn")
+            await SessionManager.mark_disconnected(task)
+            resumed = await SessionManager.create(TaskSessionRequest(setting="test", session_id=task.session_id))
+            self.assertIs(task, resumed)
+            self.assertEqual(await resumed.load_model_messages(), [{"role": "user", "content": "first turn"}])
+            task.disconnect_time = 0
+            await SessionManager.cleanup_expired()
+            self.assertEqual(await task.load_messages(), [])
+            with self.assertRaisesRegex(ValueError, "expired or unavailable"):
+                await SessionManager.create(TaskSessionRequest(setting="test", session_id=task.session_id))
+            SessionAccessor.save_meta.assert_not_awaited()
+            delete.assert_not_awaited()
+
+            chat = await SessionManager.create(ChatSessionRequest(
+                setting="test", session_type="chat", compact_prompt="Keep decisions",
+            ))
+            self.assertIsInstance(chat, ChatAgentSession)
+            self.assertEqual(chat.meta().compact_prompt, "Keep decisions")
+            await chat.expire_cache()
+            delete.assert_awaited_with(chat.session_id, delete_media=False, keep_meta=True)
+
+    async def test_short_lived_image_cache(self):
+        """Store raw bytes with expiry and resolve references only for model input."""
+        import io
+        from unittest.mock import MagicMock
+        from starlette.datastructures import Headers, UploadFile
+        from dynamic_agent_service.external_service.redis_instance import RedisInstance
+        data = b"GIF89a-\xff"
+        upload = UploadFile(io.BytesIO(data), headers=Headers({"content-type": "image/gif"}))
+        task = TaskAgentSession("test")
+        redis = MagicMock(set=AsyncMock(), delete=AsyncMock(), execute_command=AsyncMock(return_value=data))
+        pipe = redis.pipeline.return_value.__aenter__.return_value
+        pipe.expire = MagicMock()
+        with patch.object(RedisInstance, "get_client", return_value=redis):
+            images = await task.cache_images([upload])
+            key = f"task:{task.session_id}:image:{images[0].media_id}"
+            redis.set.assert_awaited_once_with(key, data, ex=300)
+            await task.append_message("user", MessageItem.from_user("inspect", images))
+            self.assertEqual((await task.read_context())[0].parts[1].image_path, key)
+            model = await task.load_model_messages()
+            redis.execute_command.assert_awaited_once_with("GET", key, NEVER_DECODE=True)
+            self.assertTrue(model[0]["content"][1]["image_url"]["url"].startswith("data:image/gif;base64,"))
+            self.assertEqual((await task.load_messages())[0]["content"][1]["type"], "image")
+            task._next_refresh = 0
+            await task.refresh_images()
+            pipe.expire.assert_called_once_with(key, 300)
+            await task.expire_cache()
+            redis.delete.assert_awaited_once_with(key)
+
     def test_tools_and_limits(self):
         """Expose agent-written arguments without a separate summarizer prompt."""
         tools = {t['function']['name']:t['function'] for t in MemoryOperator().get_serialized_operator().tools}
         self.assertEqual(set(tools), {'MemoryOperator_list','MemoryOperator_check','MemoryOperator_compact'})
         self.assertEqual(tools['MemoryOperator_compact']['parameters'].get('properties', {}), {})
         with self.assertRaises(ValueError):
-            CreateSessionRequest(setting='x',soft_limit_count=800000)
+            ChatSessionRequest(setting='x', session_type='chat', soft_limit_count=800000)
 
     async def test_message_roundtrip(self):
         """Retain provider call IDs and arguments through typed storage."""
@@ -34,7 +97,7 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_latest_boundary_inclusive_and_interrupted_pair(self):
         """Retain the newest compact call and repair an interrupted result."""
-        session=RealtimeSession('test')
+        session=ChatAgentSession('test')
         messages=[MessageItem.from_text('user','old'),
                   MessageItem.from_model({'role':'assistant','tool_calls':[{'id':'c','function':{'name':'MemoryOperator_compact','arguments':'{}'}}]}),
                   MessageItem.from_text('user','new')]
@@ -111,17 +174,17 @@ class MemoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_compaction_failure_does_not_save(self):
         """Keep original persistence when the compact task fails."""
-        session=RealtimeSession('test')
+        session=ChatAgentSession('test')
         session.agi=SimpleNamespace(openai_adapter=object())
         session.load_model_messages=AsyncMock(return_value=[{'role':'user','content':'work'}])
-        with patch('dynamic_agent_service.service.session_management.CompactTaskAgent') as task, patch.object(MemoryAccessor,'save',AsyncMock()) as save:
+        with patch('dynamic_agent_service.service.session_management.chat_agent_session.CompactTaskAgent') as task, patch.object(MemoryAccessor,'save',AsyncMock()) as save:
             task.return_value.run=AsyncMock(side_effect=ValueError('invalid submission'))
             with self.assertRaises(ValueError):await session.perform_compaction()
             save.assert_not_awaited()
 
     async def test_check_is_scoped(self):
         """Reject checkpoint IDs absent from the active session."""
-        session=RealtimeSession('test')
+        session=ChatAgentSession('test')
         session.agi=SimpleNamespace(runner_id='r',validate_pending_tool_call=lambda *a:None,
             pending_tool_calls={'c':SimpleNamespace(name='MemoryOperator_check')})
         session._trigger_open=True;session.trigger_id='t'

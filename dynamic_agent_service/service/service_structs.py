@@ -3,26 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from dynamic_agent_client.session_struct import CreateSessionRequest
 from dynamic_agent_client.client_struct import AgentResponseChunk
-
-
-class CreateSessionRequest(BaseModel):
-    # Session
-    setting: str
-    session_type: Literal["chat", "task"] = "task"
-    reconnect_keep: int = 30
-    compact_prompt: str | None = Field(default=None, min_length=1)
-    soft_limit_count: int = Field(default=512_000, gt=0)
-    hard_limit_count: int = Field(default=768_000, gt=0, validate_default=True)
-
-    @field_validator("hard_limit_count")
-    @classmethod
-    def validate_limits(cls, value, info):
-        """Require room between soft and hard limits."""
-        if value <= info.data.get("soft_limit_count", 512_000):
-            raise ValueError("hard_limit_count must exceed soft_limit_count")
-        return value
-    session_id: Optional[str] = None  # provided to resume an existing session
 
 
 class ToolResultRequest(BaseModel):
@@ -81,11 +63,11 @@ class TriggerSubagentRequest(BaseModel):
 
 # ===== Redis-backed session state =====
 # Keys:
-#   session:{session_type}:{session_id}:meta      -> SessionMeta (JSON)
-#   session:{session_type}:{session_id}:messages  -> Redis list of MessageItem (JSON)
+#   chat:{session_id}:meta      -> SessionMeta (JSON)
+#   chat:{session_id}:messages  -> Redis list of MessageItem (JSON)
 
 class SessionMeta(BaseModel):
-    """Core metadata stored at session:{session_type}:{session_id}:meta."""
+    """Core metadata stored at chat:{session_id}:meta."""
     session_id: str
     session_type: Literal["chat", "task"] = "task"
     setting: str
@@ -116,7 +98,18 @@ class StoredImagePart(BaseModel):
     detail: Literal["auto", "low", "high"] = "auto"
 
 
-MessagePart = Annotated[TextPart | StoredImagePart, Field(discriminator="type")]
+class CachedImagePart(BaseModel):
+    """Reference a short-lived binary image by its full Redis key."""
+    type: Literal["cached_image"] = "cached_image"
+    media_id: UUID
+    image_path: str
+    mime_type: Literal["image/png", "image/jpeg", "image/webp", "image/gif"]
+    byte_size: int = Field(gt=0)
+    sha256: str
+    detail: Literal["auto", "low", "high"] = "auto"
+
+
+MessagePart = Annotated[TextPart | StoredImagePart | CachedImagePart, Field(discriminator="type")]
 
 
 class MessageItem(BaseModel):
@@ -150,7 +143,7 @@ class MessageItem(BaseModel):
     def from_user(
         cls,
         text: str,
-        images: list[StoredImagePart] | None = None,
+        images: list[StoredImagePart | CachedImagePart] | None = None,
     ) -> "MessageItem":
         """Build one user message while preserving text-before-image order."""
         parts: list[MessagePart] = []

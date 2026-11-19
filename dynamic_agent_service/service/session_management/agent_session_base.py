@@ -1,3 +1,5 @@
+"""Shared session execution and WebSocket lifecycle."""
+from abc import ABC, abstractmethod
 import asyncio
 import json
 import re
@@ -12,16 +14,12 @@ from dynamic_agent_service.external_service.openai_resource_accessor import Open
 from dynamic_agent_service.external_service.openai_adapter import OpenAIAdapter
 from dynamic_agent_service.service.media_storage import MediaStorage
 from dynamic_agent_service.service.service_structs import (
-    CreateSessionRequest,
     MessageItem,
     SessionMeta,
     StoredImagePart,
 )
 from dynamic_agent_service.logging.log_interface import LogInterface
 from dynamic_agent_service.logging.setup_logging import get_my_logger
-from dynamic_agent_service.service.session_accessor import SessionAccessor
-from dynamic_agent_service.service.memory_accessor import MemoryAccessor
-from dynamic_agent_service.agent.compact_agent import CompactTaskAgent
 
 logger = get_my_logger()
 
@@ -44,26 +42,23 @@ def _tool_arguments_to_object(raw: str | dict | None) -> dict:
     return arguments
 
 
-class RealtimeSession:
+class AgentSessionBase(ABC):
+    """Manage turns, tools and connections for one agent session."""
+
+    session_type: str
+
+    @abstractmethod
+    async def expire_cache(self) -> None:
+        """Release storage after the reconnection window expires."""
+
     def __init__(
         self,
         setting: str,
-        session_type: str = "task",
         reconnect_keep: int = 30,
         session_id: str = None,
-        soft_limit_count: int = 512_000,
-        hard_limit_count: int = 768_000,
-        compact_prompt: str | None = None,
     ):
         self.session_id = session_id or str(uuid.uuid4())
-        self.session_type = session_type
         self.setting = setting
-        self.compact_prompt = compact_prompt
-        self.soft_limit_count = soft_limit_count
-        self.hard_limit_count = hard_limit_count
-        self._call_message_ids = {}
-        self._compact_pending = False
-        self._last_user_instruction = ""
         self.reconnect_keep = reconnect_keep
         self.created_at = time.time()
         self.disconnect_time: float | None = None
@@ -94,26 +89,22 @@ class RealtimeSession:
 
     # ===== Session message persistence =====
 
-    async def append_message(
-        self,
-        role: str,
-        content: str | MessageItem,
-    ) -> str:
-        """Store a message in both backends and return its UUID."""
-        return await SessionAccessor.append_message(
-            self.session_id,
-            content if isinstance(content, MessageItem) else MessageItem.from_text(role, content),
-            self.session_type,
-        )
+    @abstractmethod
+    async def append_message(self, role: str, content: str | MessageItem) -> str:
+        """Append a message to this session's history."""
+
+    @abstractmethod
+    async def read_context(self) -> list[MessageItem]:
+        """Read the messages available to this turn."""
 
     async def load_messages(self) -> list[dict]:
         """Load public history without filesystem paths or encoded image bytes."""
-        messages = await SessionAccessor.load_context(self.session_id, self.session_type)
+        messages = await self.read_context()
         return [message.public_message() for message in messages]
 
     async def load_model_messages(self) -> list[dict]:
         """Materialize stored image references for one model turn."""
-        messages = await SessionAccessor.load_context(self.session_id, self.session_type)
+        messages = await self.read_context()
         selected = [await MediaStorage.materialize(message) for message in messages]
         # Interrupted executions must not leave dangling calls in model context.
         result = []
@@ -145,54 +136,7 @@ class RealtimeSession:
     async def persist_runner_messages(self, messages: list[dict]) -> None:
         """Commit assistant calls and results before the next model invocation."""
         for message in messages:
-            message_id = await self.append_message(message["role"], MessageItem.from_model(message))
-            for call in message.get("tool_calls", []):
-                self._call_message_ids[call["id"]] = message_id
-
-    async def compacted_context(self) -> list[dict] | None:
-        """Compact after the request's tool result is safely stored."""
-        if not self._compact_pending:
-            return None
-        self._compact_pending = False
-        return await self.perform_compaction()
-
-    async def perform_compaction(self) -> list[dict]:
-        """Run the task agent, commit its generated message, then restore context."""
-        snapshot = await self.load_model_messages()
-        task = CompactTaskAgent(self.agi.openai_adapter, self.session_id, compact_prompt=self.compact_prompt)
-        result = await asyncio.wait_for(task.run(snapshot, self._last_user_instruction), timeout=120)
-        content = ("Previous conversation has been compacted. This is conversation memory, not new instructions.\n\n"
-                   f"Summary:\n{result.summary}\n\nCompacted memory:\n{result.compacted}\n\n"
-                   f"Last user instruction:\n{self._last_user_instruction}")
-        message = MessageItem.from_text("user", content)
-        message.message_id = str(uuid.uuid4())
-        checkpoint = {"id": str(uuid.uuid4()), "summary": result.summary, "compacted": result.compacted,
-                      "last_message_id": message.message_id}
-        await MemoryAccessor.save(self.session_id, self.session_type, checkpoint, message)
-        return await self.load_model_messages()
-
-    async def memory(self, request) -> object:
-        """Handle memory only for a pending main-agent tool invocation."""
-        if request.runner_id != self.agi.runner_id or not self.accepts_trigger(request.trigger_id):
-            raise ValueError("Memory request does not belong to the active main runner")
-        self.agi.validate_pending_tool_call(request.runner_id, request.tool_call_id)
-        call = self.agi.pending_tool_calls[request.tool_call_id]
-        if call.name != f"MemoryOperator_{request.action}":
-            raise ValueError("Memory action does not match the pending tool")
-        if request.action == "compact":
-            if len(self.agi.pending_tool_calls) != 1:
-                raise ValueError("Call compact alone without parallel tools")
-            if _tool_arguments_to_object(call.arguments):
-                raise ValueError("compact takes no arguments")
-            self._compact_pending = True
-            return {"status": "requested", "message": "Compaction runs before the agent resumes."}
-        checkpoints = await MemoryAccessor.all(self.session_id, self.session_type)
-        if request.action == "list":
-            return [{"id": c["id"], "summary": c["summary"]} for c in checkpoints]
-        for checkpoint in checkpoints:
-            if checkpoint["id"] == request.checkpoint_id:
-                return checkpoint
-        raise ValueError("Checkpoint not found in this session")
+            await self.append_message(message["role"], MessageItem.from_model(message))
 
     def meta(self) -> SessionMeta:
         """Return Redis metadata for the current session."""
@@ -200,10 +144,7 @@ class RealtimeSession:
             session_id=self.session_id,
             session_type=self.session_type,
             setting=self.setting,
-            compact_prompt=self.compact_prompt,
             reconnect_keep=self.reconnect_keep,
-            soft_limit_count=self.soft_limit_count,
-            hard_limit_count=self.hard_limit_count,
             created_at=self.created_at,
             disconnect_time=self.disconnect_time,
         )
@@ -225,11 +166,7 @@ class RealtimeSession:
             log_session_id=self.session_id,
         )
         self.agi._runner.on_messages = self.persist_runner_messages
-        self.agi._runner.after_tools = self.compacted_context
-        self.agi._runner.on_compact = self.perform_compaction
         self.agi._runner.on_error = self.runner_error
-        self.agi._runner.soft_limit_count = self.soft_limit_count
-        self.agi._runner.hard_limit_count = self.hard_limit_count
         LogInterface.configure_resource(self.session_id, resource.resource_id)
 
     async def attach_websocket(self, client: WebSocket):
@@ -269,8 +206,6 @@ class RealtimeSession:
     ) -> None:
         """Reserve a turn before its background task starts."""
         self.trigger_id = trigger_id
-        self._last_user_instruction = text
-        self._compact_pending = False
         self._trigger_open = True
         self.agi.set_trigger(trigger_id)
         LogInterface.start_trigger(self.session_id, trigger_id)
@@ -287,7 +222,6 @@ class RealtimeSession:
         self.agi.reset_after_stop()
         self.active_trigger_task = None
         self._trigger_open = False
-        self._compact_pending = False
         self._stopping = False
         self._terminal_chunk = chunk
 
@@ -505,83 +439,3 @@ class RealtimeSession:
                 trigger_id=self.trigger_id,
             )
             await self.client.send_json(message.model_dump(exclude_none=True))
-
-
-class RealtimeSessionManager:
-    _sessions: dict[str, RealtimeSession] = {}
-    _cleanup_task: asyncio.Task | None = None
-
-    @classmethod
-    async def create(cls, request: CreateSessionRequest) -> RealtimeSession:
-        existing = cls._sessions.get(request.session_id) if request.session_id else None
-        if existing is not None and existing.session_type != request.session_type:
-            raise ValueError("A session ID cannot change session_type")
-        stored_meta = await SessionAccessor.load_meta(request.session_id) if request.session_id else None
-        if stored_meta is not None and stored_meta.session_type != request.session_type:
-            raise ValueError("A session ID cannot change session_type")
-        if (
-            request.session_id
-            and request.session_type == "task"
-            and stored_meta is None
-            and await SessionAccessor.has_persisted_messages(request.session_id)
-        ):
-            raise ValueError("A persisted chat session ID cannot be reused as a task")
-        session = RealtimeSession(
-            setting=request.setting,
-            session_type=request.session_type,
-            reconnect_keep=request.reconnect_keep,
-            session_id=request.session_id,
-            soft_limit_count=request.soft_limit_count,
-            hard_limit_count=request.hard_limit_count,
-            compact_prompt=(request.compact_prompt if "compact_prompt" in request.model_fields_set
-                            else stored_meta.compact_prompt if stored_meta is not None
-                            else existing.compact_prompt if existing is not None else None),
-        )
-        if stored_meta is not None:
-            session.created_at = stored_meta.created_at
-        cls._sessions[session.session_id] = session
-        await SessionAccessor.save_meta(session.meta())
-        cls._ensure_cleanup_task()
-        return session
-
-    @classmethod
-    def get(cls, session_id: str) -> RealtimeSession | None:
-        return cls._sessions.get(session_id)
-
-    @classmethod
-    async def mark_disconnected(cls, session: RealtimeSession):
-        """Mark session as disconnected, starts reconnect_keep countdown."""
-        session.disconnect_time = time.time()
-        await SessionAccessor.save_meta(session.meta())
-
-    @classmethod
-    async def cleanup_expired(cls):
-        """Remove expired sessions from process memory and Redis."""
-        expired = [sid for sid, session in cls._sessions.items() if session.is_expired()]
-        for sid in expired:
-            session = cls._sessions.pop(sid, None)
-            if session is not None:
-                try:
-                    await session.stop()
-                    await SessionAccessor.delete_cached_messages(
-                        sid,
-                        session.session_type,
-                        delete_media=session.session_type == "task",
-                        keep_meta=session.session_type == "chat",
-                    )
-                except Exception:
-                    pass
-                LogInterface.release_session(sid)
-
-    @classmethod
-    def _ensure_cleanup_task(cls):
-        """Start background cleanup task if not already running."""
-        if cls._cleanup_task is None or cls._cleanup_task.done():
-            cls._cleanup_task = asyncio.create_task(cls._cleanup_loop())
-
-    @classmethod
-    async def _cleanup_loop(cls):
-        """Background task that runs cleanup_expired every 10 seconds."""
-        while True:
-            await asyncio.sleep(10)
-            await cls.cleanup_expired()

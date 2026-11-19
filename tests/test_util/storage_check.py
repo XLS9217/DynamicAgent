@@ -26,9 +26,9 @@ __all__ = [
 ]
 
 
-def session_messages_key(session_id: str, session_type: str = "chat") -> str:
+def session_messages_key(session_id: str) -> str:
     """Return the Redis key used for a session's message list."""
-    return f"session:{session_type}:{session_id}:messages"
+    return f"chat:{session_id}:messages"
 
 
 @dataclass(frozen=True)

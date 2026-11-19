@@ -1,55 +1,24 @@
-from pathlib import Path
-from typing import Callable, Self
+"""Task client for sessions with process-local history."""
+from typing import Self
 
+from .session_struct import TaskSessionRequest
 from .client import DynamicAgentClient
-from .client_struct import AgentEvent, AgentResponseChunk
 
 
 class DynamicAgentTaskClient(DynamicAgentClient):
-    """Dynamic Agent client with ephemeral Redis task history."""
-
-    @classmethod
-    async def connect(cls, server_addr: str):
-        return await super().connect(server_addr)
+    """Run tasks with ephemeral session history."""
 
     @classmethod
     async def create(
         cls,
         setting: str,
         reconnect_keep: int = 30,
-        session_id: str = None,
-        soft_limit_count: int = 512_000,
-        hard_limit_count: int = 768_000,
-        compact_prompt: str | None = None,
+        session_id: str | None = None,
     ) -> Self:
-        return await super().create(
+        """Create or resume a task session."""
+        return await cls._open(TaskSessionRequest(
             setting=setting,
             session_type="task",
             reconnect_keep=reconnect_keep,
             session_id=session_id,
-            soft_limit_count=soft_limit_count,
-            hard_limit_count=hard_limit_count,
-            compact_prompt=compact_prompt,
-        )
-
-    async def trigger(
-        self,
-        text: str,
-        on_chunk: Callable[[AgentResponseChunk], None] = None,
-        on_event: Callable[[AgentEvent], None] = None,
-        images: list[str | Path] | None = None,
-    ):
-        return await super().trigger(text, on_chunk, on_event, images)
-
-    async def stop(self) -> None:
-        return await super().stop()
-
-    async def add_operator(self, operator):
-        return await super().add_operator(operator)
-
-    @classmethod
-    async def delete_session(cls, session_id: str) -> bool:
-        return await super().delete_session(session_id)
-
-    async def close(self):
-        return await super().close()
+        ))

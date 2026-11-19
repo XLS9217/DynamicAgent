@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from dynamic_agent_service.external_service.pg_instance import PgInstance
 from dynamic_agent_service.service.session_accessor import SessionAccessor
-from dynamic_agent_service.service.session_management import RealtimeSession, RealtimeSessionManager
+from dynamic_agent_service.service.session_management import ChatAgentSession, SessionManager
 from tests.test_util.storage_check import assert_session_persisted, get_session_storage, storage_connections
 
 load_dotenv()
@@ -25,9 +25,8 @@ class SessionStorageCleanupIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 pool = MagicMock()
                 pool.acquire.return_value.__aenter__ = AsyncMock(return_value=connection)
                 pool.acquire.return_value.__aexit__ = AsyncMock(return_value=None)
-                session = RealtimeSession(
+                session = ChatAgentSession(
                     "test",
-                    session_type="chat",
                     reconnect_keep=1,
                     session_id=session_id,
                 )
@@ -35,12 +34,12 @@ class SessionStorageCleanupIntegrationTest(unittest.IsolatedAsyncioTestCase):
                 try:
                     with (
                         patch.object(PgInstance, "get_pool", return_value=pool),
-                        patch.object(RealtimeSessionManager, "_sessions", {session_id: session}),
+                        patch.object(SessionManager, "_sessions", {session_id: session}),
                     ):
                         await session.append_message("user", "test message")
                         await assert_session_persisted(session_id, expected)
-                        await RealtimeSessionManager.cleanup_expired()
-                        self.assertIsNone(RealtimeSessionManager.get(session_id))
+                        await SessionManager.cleanup_expired()
+                        self.assertIsNone(SessionManager.get(session_id))
                         snapshot = await get_session_storage(session_id)
                         self.assertEqual(snapshot.redis_messages, [])
                         self.assertEqual(
@@ -51,6 +50,6 @@ class SessionStorageCleanupIntegrationTest(unittest.IsolatedAsyncioTestCase):
                         await assert_session_persisted(session_id, expected)
                 finally:
                     try:
-                        await SessionAccessor.delete_cached_messages(session_id, "chat")
+                        await SessionAccessor.delete_cached_messages(session_id)
                     finally:
                         await transaction.rollback()

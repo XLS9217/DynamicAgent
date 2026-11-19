@@ -12,7 +12,10 @@ class ClientMemoryRegistrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def check_registration(self, client_type, expected_type, **kwargs):
         """Exercise session creation with isolated transport and registration."""
-        async def create_session(setting, instance, **options):
+        async def create_session(request, instance):
+            options = request.model_dump(exclude_none=True)
+            for field in ("soft_limit_count", "hard_limit_count"):
+                self.assertEqual(field in options, expected_type == "chat")
             return options.get('session_id') or 'new-session', options['session_type'], 'runner', None, []
 
         with patch.object(ServiceHandler, 'create_session', side_effect=create_session), \
@@ -37,7 +40,12 @@ class ClientMemoryRegistrationTests(unittest.IsolatedAsyncioTestCase):
         await self.check_registration(DynamicAgentTaskClient, 'task')
         await self.check_registration(DynamicAgentTaskClient, 'task', session_id='restored')
 
-    async def test_generic_client_obeys_session_type(self):
-        """The generic entry point follows the same session policy."""
-        await self.check_registration(DynamicAgentClient, 'task')
-        await self.check_registration(DynamicAgentClient, 'chat', session_type='chat')
+    def test_api_rejects_chat_options_on_tasks(self):
+        from pydantic import TypeAdapter, ValidationError
+        from dynamic_agent_client.session_struct import CreateSessionRequest
+
+        adapter = TypeAdapter(CreateSessionRequest)
+        self.assertEqual(adapter.validate_python({"setting": "x"}).session_type, "task")
+        for field, value in (("soft_limit_count", 100), ("hard_limit_count", 200), ("compact_prompt", "brief")):
+            with self.subTest(field=field), self.assertRaises(ValidationError):
+                adapter.validate_python({"setting": "x", "session_type": "task", field: value})

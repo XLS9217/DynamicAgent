@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile, WebSocket
 from pydantic import BaseModel, Field
 
-from dynamic_agent_service.service.session_management import RealtimeSessionManager
+from dynamic_agent_service.service.session_management import ChatAgentSession, SessionManager, TaskAgentSession
 from dynamic_agent_service.agent.agent_structs import AgentState
 from dynamic_agent_service.service.session_accessor import SessionAccessor
 from dynamic_agent_service.service.media_storage import MediaStorage
@@ -39,9 +39,11 @@ async def memory(body: MemoryRequest):
     """Access memory through the active session and tool identity."""
     if body.action not in {"list", "check", "compact"}:
         raise HTTPException(status_code=422, detail="Unknown memory action")
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    if not isinstance(session, ChatAgentSession):
+        raise HTTPException(status_code=409, detail="Memory requires a chat session")
     try:
         return await session.memory(body)
     except (ValueError, KeyError) as exc:
@@ -51,10 +53,11 @@ async def memory(body: MemoryRequest):
 @router.post("/create_session")
 async def create_session(body: CreateSessionRequest, request: Request):
     try:
-        session = await RealtimeSessionManager.create(request=body)
+        session = await SessionManager.create(request=body)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    await session.agent_setup()
+    if session.agi is None:
+        await session.agent_setup()
 
     scheme = request.headers.get("x-forwarded-proto", "http")
     ws_scheme = "wss" if scheme == "https" else "ws"
@@ -86,7 +89,7 @@ async def session_messages(session_id: UUID, offset: int = Query(0, ge=0), limit
         raise HTTPException(status_code=404, detail="Chat session not found")
     if meta is None and not await SessionAccessor.has_persisted_messages(identity):
         raise HTTPException(status_code=404, detail="Chat session not found")
-    messages = await SessionAccessor.load_context(identity, "chat")
+    messages = await SessionAccessor.load_context(identity)
     return {"session_id": identity, "scope": "current_context",
             "system_prompt": meta.setting if meta else None,
             "items": [item.public_message() for item in messages[offset:offset + limit]],
@@ -96,7 +99,7 @@ async def session_messages(session_id: UUID, offset: int = Query(0, ge=0), limit
 
 @router.post("/tool_result")
 async def tool_result(body: ToolResultRequest):
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if not session.accepts_trigger(body.trigger_id):
@@ -115,7 +118,7 @@ async def tool_result(body: ToolResultRequest):
 
 @router.post("/init_subagent")
 async def init_subagent(body: InitSubagentRequest):
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if not session.accepts_trigger(body.trigger_id):
@@ -134,7 +137,7 @@ async def init_subagent(body: InitSubagentRequest):
 
 @router.post("/trigger_subagent")
 async def trigger_subagent(body: TriggerSubagentRequest):
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if not session.accepts_trigger(body.trigger_id):
@@ -154,7 +157,7 @@ async def trigger_subagent(body: TriggerSubagentRequest):
 @router.websocket("/agent_session")
 async def agent_session(websocket: WebSocket, session_id: str):
     logger.info("WebSocket request received for session %s", session_id)
-    session = RealtimeSessionManager.get(session_id)
+    session = SessionManager.get(session_id)
     if session is None:
         await websocket.close(code=4004)
         return
@@ -167,7 +170,7 @@ async def agent_session(websocket: WebSocket, session_id: str):
     finally:
         # Only mark disconnected if this websocket is still the active one
         if session.client is websocket:
-            await RealtimeSessionManager.mark_disconnected(session)
+            await SessionManager.mark_disconnected(session)
             logger.info("WebSocket cleaned up for session %s", session_id)
         else:
             logger.info("WebSocket was replaced for session %s, skipping disconnect", session_id)
@@ -183,7 +186,7 @@ async def register_operator(body: RegisterOperatorRequest):
     """
     Receives a session_id and a serialized operator, registers it on the session's AGI.
     """
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     session.register_operator(body.operator)
@@ -205,7 +208,7 @@ class StopRequest(BaseModel):
 @router.post("/stop")
 async def stop(body: StopRequest):
     """Stop the requested turn; repeated or outdated requests do nothing."""
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     completion = await session.stop(body.trigger_id)
@@ -220,7 +223,7 @@ async def trigger(body: TriggerRequest):
     """
     Trigger agent with text input. Response streams via WebSocket.
     """
-    session = RealtimeSessionManager.get(body.session_id)
+    session = SessionManager.get(body.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.state is not AgentState.IDLE:
@@ -238,7 +241,7 @@ async def trigger_media(
     images: list[UploadFile] = File(...),
 ):
     """Accept raw image uploads and start one multimodal turn."""
-    session = RealtimeSessionManager.get(session_id)
+    session = SessionManager.get(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     if session.state is not AgentState.IDLE:
@@ -246,9 +249,13 @@ async def trigger_media(
     accepted_trigger_id = trigger_id or uuid4().hex
     stored_images = []
     try:
-        stored_images = await MediaStorage.save_uploads(images)
+        if isinstance(session, TaskAgentSession):
+            stored_images = await session.cache_images(images)
+        else:
+            stored_images = await MediaStorage.save_uploads(images)
         session.start_trigger(text, accepted_trigger_id, images=stored_images)
     except ValueError as exc:
+        await MediaStorage.delete(stored_images)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except BaseException:
         await MediaStorage.delete(stored_images)
@@ -261,11 +268,7 @@ async def delete_session(session_id: str):
     """
     Delete persisted chat messages for a session and remove the live session if present.
     """
-    session = RealtimeSessionManager.get(session_id)
-    stored_meta = await SessionAccessor.load_meta(session_id) if session is None else None
-    session_type = session.session_type if session is not None else (
-        stored_meta.session_type if stored_meta is not None else "chat"
-    )
+    session = SessionManager.get(session_id)
     if session is not None:
         await session.stop()
     if session is not None and session.client is not None:
@@ -275,8 +278,11 @@ async def delete_session(session_id: str):
             await client.close()
         except Exception as e:
             logger.warning("Failed to close websocket for session %s: %s", session_id, e)
-    RealtimeSessionManager._sessions.pop(session_id, None)
-    await SessionAccessor.delete_session(session_id, session_type)
+    SessionManager._sessions.pop(session_id, None)
+    if isinstance(session, TaskAgentSession):
+        await session.expire_cache()
+    else:
+        await SessionAccessor.delete_session(session_id)
     return {"status": "ok", "session_id": session_id}
 
 

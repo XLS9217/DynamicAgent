@@ -158,9 +158,7 @@ images.
 6. If a chat database transaction fails, remove the files finalized for that
    message. A periodic orphan cleanup handles process crashes between steps 4
    and 5.
-7. Append the message document to
-   `session:{session_type}:{session_id}:messages` in Redis. A chat cache miss can
-   rebuild from PostgreSQL. A task cache miss has no durable fallback.
+7. Cache chat messages at `chat:{session_id}:messages`. PostgreSQL supplies chat history on a cache miss. Task message lists stay in process memory.
 
 The service does not publish a message or start the model call until its files
 and configured storage writes complete.

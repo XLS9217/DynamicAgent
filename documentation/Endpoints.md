@@ -41,7 +41,7 @@ Request:
 }
 ```
 
-`session_type` is `chat` (durable PostgreSQL history) or `task` (temporary Redis
+`session_type` is `chat` (durable PostgreSQL history) or `task` (temporary process-local
 history) and defaults to `task`. `reconnect_keep` is the disconnect retention
 period in seconds and defaults to `30`.
 

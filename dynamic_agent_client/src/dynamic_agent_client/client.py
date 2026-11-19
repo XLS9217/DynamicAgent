@@ -19,7 +19,7 @@ from .client_struct import (
     service_to_client_message_adapter,
 )
 from .operator.agent_operator_base import AgentOperator
-from .operator.memory_operator import MemoryOperator
+from .session_struct import CreateSessionRequest
 from .service_handler import ServiceHandler
 
 
@@ -54,39 +54,8 @@ class DynamicAgentClient:
         await ServiceHandler.connect(server_addr)
 
     @classmethod
-    async def create(
-        cls,
-        setting: str,
-        session_type: Literal["chat", "task"] = "task",
-        reconnect_keep: int = 30,
-        session_id: str = None,
-        soft_limit_count: int = 512_000,
-        hard_limit_count: int = 768_000,
-        compact_prompt: str | None = None,
-    ) -> Self:
-        """Create a Redis-only task or durable chat session."""
-        return await cls._create(
-            setting=setting,
-            session_type=session_type,
-            reconnect_keep=reconnect_keep,
-            session_id=session_id,
-            soft_limit_count=soft_limit_count,
-            hard_limit_count=hard_limit_count,
-            compact_prompt=compact_prompt,
-        )
-
-    @classmethod
-    async def _create(
-        cls,
-        setting: str,
-        session_type: Literal["chat", "task"],
-        reconnect_keep: int,
-        session_id: str | None,
-        soft_limit_count: int = 512_000,
-        hard_limit_count: int = 768_000,
-        compact_prompt: str | None = None,
-    ) -> Self:
-        """Create the concrete client with an explicit storage policy."""
+    async def _open(cls, request: CreateSessionRequest) -> Self:
+        """Open the requested session and start receiving events."""
         instance = cls()
         (
             instance.session_id,
@@ -94,19 +63,8 @@ class DynamicAgentClient:
             instance.runner_id,
             instance.websocket,
             instance.messages,
-        ) = await ServiceHandler.create_session(
-            setting,
-            instance,
-            session_type=session_type,
-            reconnect_keep=reconnect_keep,
-            session_id=session_id,
-            soft_limit_count=soft_limit_count,
-            hard_limit_count=hard_limit_count,
-            compact_prompt=compact_prompt,
-        )
+        ) = await ServiceHandler.create_session(request, instance)
         instance._listen_task = asyncio.ensure_future(instance._listen())
-        if instance.session_type == "chat":
-            await instance.add_operator(MemoryOperator())
         return instance
 
     async def _listen(self):

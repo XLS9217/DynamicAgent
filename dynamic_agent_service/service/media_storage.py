@@ -6,10 +6,13 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
+from redis.client import NEVER_DECODE
+
 import aiofiles
 from fastapi import UploadFile
 
-from dynamic_agent_service.service.service_structs import MessageItem, StoredImagePart, TextPart
+from dynamic_agent_service.external_service.redis_instance import RedisInstance
+from dynamic_agent_service.service.service_structs import CachedImagePart, MessageItem, StoredImagePart, TextPart
 
 
 _EXTENSIONS = {
@@ -108,10 +111,44 @@ class MediaStorage:
                 await upload.close()
         return stored
 
+    @staticmethod
+    async def cache_task_uploads(uploads: list[UploadFile], session_id: str, ttl: int) -> list[CachedImagePart]:
+        """Cache validated image bytes with an atomic expiry."""
+        maximum = int(os.getenv("MEDIA_MAX_BYTES", str(10 * 1024 * 1024)))
+        parts = []
+        try:
+            if len(uploads) > int(os.getenv("MEDIA_MAX_FILES", "16")):
+                raise ValueError("Too many images in one trigger")
+            for upload in uploads:
+                data = await upload.read(maximum + 1)
+                if len(data) > maximum:
+                    raise ValueError(f"Image exceeds {maximum} bytes")
+                mime = _detected_mime(data[:16])
+                if mime is None or mime != upload.content_type:
+                    raise ValueError("Image content does not match its supported MIME type")
+                media_id = uuid4()
+                part = CachedImagePart(
+                    media_id=media_id, image_path=f"task:{session_id}:image:{media_id}",
+                    mime_type=mime, byte_size=len(data),
+                    sha256=hashlib.sha256(data).hexdigest(),
+                )
+                parts.append(part)
+                await RedisInstance.get_client().set(part.image_path, data, ex=ttl)
+        except BaseException:
+            await MediaStorage.delete(parts)
+            raise
+        finally:
+            for upload in uploads:
+                await upload.close()
+        return parts
+
     @classmethod
-    async def delete(cls, images: list[StoredImagePart]) -> None:
+    async def delete(cls, images: list[StoredImagePart | CachedImagePart]) -> None:
         """Delete media files while tolerating already-removed files."""
         for image in images:
+            if isinstance(image, CachedImagePart):
+                await RedisInstance.get_client().delete(image.image_path)
+                continue
             cls._resolve(image.relative_path).unlink(missing_ok=True)
 
     @classmethod
@@ -124,9 +161,16 @@ class MediaStorage:
             if isinstance(part, TextPart):
                 content.append({"type": "text", "text": part.text})
                 continue
-            path = cls._resolve(part.relative_path)
-            async with aiofiles.open(path, "rb") as source:
-                data = await source.read()
+            if isinstance(part, CachedImagePart):
+                data = await RedisInstance.get_client().execute_command(
+                    "GET", part.image_path, **{NEVER_DECODE: True},
+                )
+                if data is None:
+                    raise ValueError(f"Cached image expired: {part.media_id}")
+            else:
+                path = cls._resolve(part.relative_path)
+                async with aiofiles.open(path, "rb") as source:
+                    data = await source.read()
             if len(data) != part.byte_size or hashlib.sha256(data).hexdigest() != part.sha256:
                 raise ValueError(f"Stored media failed integrity check: {part.media_id}")
             encoded = base64.b64encode(data).decode("ascii")
